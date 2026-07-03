@@ -1,0 +1,131 @@
+local logger = require("logger")
+
+---@class Devices
+---@field mac string
+---@field name string
+---@field paired boolean
+---@field bonded boolean
+---@field trusted boolean
+---@field blocked boolean
+---@field connected boolean
+---@field backend any The platform backend (Bluez, PocketBook, ...) used to actually talk to hardware
+local Devices = {}
+Devices.__index = Devices
+
+--- Create a new device.
+--- o.backend should be the platform controller (e.g. Bluez) that knows how
+--- to actually pair/connect/etc. This lets a Devices instance perform its
+--- own actions without the caller needing to know which platform it's on.
+function Devices:new(o)
+    o = o or {}
+    setmetatable(o, self)
+    self.__index = self
+    o:init()
+    return o
+end
+
+function Devices:init()
+    self.mac = self.mac or ""
+    self.name = self.name or ""
+    self.paired = self.paired or false
+    self.bonded = self.bonded or false
+    self.trusted = self.trusted or false
+    self.blocked = self.blocked or false
+    self.connected = self.connected or false
+    self.backend = self.backend
+end
+
+--- Build a Devices instance from a raw "mac, name" pair, as produced by
+--- scanning/listing known devices.
+function Devices:fromScan(mac, name, backend)
+    return Devices:new({ mac = mac, name = name, backend = backend })
+end
+
+--- Populate fields from `bluetoothctl info <mac>` style output.
+function Devices:parseInfo(output)
+    self.mac = output:match("Device (%w+:%w+:%w+:%w+:%w+:%w+)") or self.mac
+
+    self.name = output:match("Name: (%w+)")
+    if not self.name then
+        self.name = output:match("Alias: (%w+)")
+    end
+
+    local paired = output:match("Paired: (%w+)")
+    self.paired = paired and (paired == "yes") or false
+
+    local bonded = output:match("Bonded: (%w+)")
+    self.bonded = bonded and (bonded == "yes") or false
+
+    local trusted = output:match("Trusted: (%w+)")
+    self.trusted = trusted and (trusted == "yes") or false
+
+    local blocked = output:match("Blocked: (%w+)")
+    self.blocked = blocked and (blocked == "yes") or false
+
+    local connected = output:match("Connected: (%w+)")
+    self.connected = connected and (connected == "yes") or false
+
+    return self
+end
+
+--- Refresh this device's status fields by asking the backend for `info`.
+function Devices:refresh()
+    if not self.backend or not self.backend.info then
+        logger.warn("Devices:refresh called with no backend set on device " .. tostring(self.mac))
+        return self
+    end
+    local output = self.backend:info(self.mac)
+    if output then
+        self:parseInfo(output)
+    end
+    return self
+end
+
+function Devices:pair()
+    if not self.backend then
+        logger.warn("Devices:pair called with no backend set on device " .. tostring(self.mac))
+        return
+    end
+    self.backend:pair(self.mac)
+    self.paired = true
+end
+
+function Devices:unpair()
+    if not self.backend then
+        logger.warn("Devices:unpair called with no backend set on device " .. tostring(self.mac))
+        return
+    end
+    self.backend:unpair(self.mac)
+    self.paired = false
+    self.connected = false
+end
+
+function Devices:connect()
+    if not self.backend then
+        logger.warn("Devices:connect called with no backend set on device " .. tostring(self.mac))
+        return
+    end
+    self.backend:connect(self.mac)
+    self.connected = true
+end
+
+function Devices:disconnect()
+    if not self.backend then
+        logger.warn("Devices:disconnect called with no backend set on device " .. tostring(self.mac))
+        return
+    end
+    self.backend:disconnect(self.mac)
+    self.connected = false
+end
+
+function Devices:remove()
+    if not self.backend or not self.backend.remove then
+        logger.warn("Devices:remove called with no backend set on device " .. tostring(self.mac))
+        return
+    end
+    self.backend:remove(self.mac)
+    self.paired = false
+    self.connected = false
+end
+
+return Devices
