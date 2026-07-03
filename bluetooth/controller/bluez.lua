@@ -33,12 +33,13 @@ m	disconnect		        Disconnect a device or optionally disconnect a single prof
 --]] --
 local _ = require("gettext")
 local logger = require("logger")
+local Devices = require("bluetooth/controller/devices")
 
 local bluez = {}
 
 function bluez:new()
-    local bluez = setmetatable({}, pocketbook)
-    return bluez
+    self.__index = self
+    return setmetatable({}, self)
 end
 
 function bluez:isOn()
@@ -49,34 +50,30 @@ function bluez:isOff()
     return os.execute('bluetoothctl show  | grep -o "Powered: no"') == 0
 end
 
-function bluez:toggle() --menu_items
-    -- PocketBook-specific Bluetooth toggle logic
-    logger.info("Toggling Bluetooth connection...")
-    local msg = ""
-    if self:isOff() then
-        self:enable()
-    else
-        self:disable()
-    end
-end
-
-function bluez:enable() --menu_items
-    -- PocketBook-specific Bluetooth connection logic
-    if self:isOff() then
-        logger.info("Enabling Bluetooth...")
-        os.execute('bluetoothctl power on &')
-    end
-end
-
-function bluez:disable() --menu_items
-    -- PocketBook-specific Bluetooth disconnection logic
+function bluez:status()
     if self:isOn() then
-        logger.info("Disabling Bluetooth...")
-        os.execute('bluetoothctl power off &')
+        logger.info("Bluetooth is enabled")
+        return true
+    elseif self:isOff() then
+        logger.info("Bluetooth is disabled")
+        return false
     end
+end
+
+function bluez:enable()
+    logger.info("Enabling Bluetooth...")
+    os.execute('bluetoothctl power on &')
+end
+
+function bluez:disable()
+    logger.info("Disabling Bluetooth...")
+    os.execute('bluetoothctl power off &')
 end
 
 function bluez:pair(mac)
+    if not self:isOn() then
+        self:enable()
+    end
     os.execute('bluetoothctl -t 4 pair ' .. mac .. ' &')
     logger.info("Pairing with Bluetooth device: " .. mac)
 end
@@ -87,6 +84,9 @@ function bluez:unpair(mac)
 end
 
 function bluez:connect(mac)
+    if not self:isOn() then
+        self:enable()
+    end
     os.execute('bluetoothctl -t 4 connect ' .. mac .. ' &')
     logger.info("Connecting to Bluetooth device: " .. mac)
 end
@@ -96,26 +96,44 @@ function bluez:disconnect(mac)
     logger.info("Disconnecting from Bluetooth device: " .. mac)
 end
 
+
+--- Parses one line of `bluetoothctl devices`/scan-style output of the form
+--- "Device AA:BB:CC:DD:EE:FF Some Name" (with an optional [NEW] prefix
+--- handled by the caller). Returns mac, name or nil if the line doesn't match.
+local function parseDeviceLine(line)
+    local mac, rest = string.match(line, "Device (%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)%s+(.*)")
+    if not mac then
+        return nil
+    end
+    rest = rest and rest:gsub("^%s+", ""):gsub("%s+$", "") or ""
+    local dashMac = mac:gsub(":", "-")
+    local name = (rest == "" or rest:upper() == dashMac:upper()) and "Unknown" or rest
+    return mac, name
+end
+
 function bluez:knownDevices()
     local handle = io.popen("bluetoothctl devices")
     local output = handle:read("*a")
     handle:close()
 
     local devices = {}
-    for mac, name in string.gmatch(output, "Device ([^ ]+) (.+)") do
-        table.insert(devices, { mac = mac, name = name })
+    for line in string.gmatch(output, "[^\r\n]+") do
+        local mac, name = parseDeviceLine(line)
+        if mac then
+            table.insert(devices, Devices:fromScan(mac, name, self))
+        end
     end
 
     return devices
 end
 
-function bluez:scanBluetoothDevices()
+function bluez:scan()
     local handle = io.popen("bluetoothctl -t 4 scan on")
     local output = handle:read("*a")
     handle:close()
 
-    -- Strip ANSI escape/color codes (e.g. ESC[0;92m ... ESC[0m)
-    output = output:gsub("\27%[[%d;]*m", "")
+    output = output:gsub("\27%[[%d;]*m", "") -- This Strips ANSI escape/color codes (e.g. ESC[0;92m ... ESC[0m)
+    output = output:gsub("[\1-\2]", "") -- this strips unicode 01, 02 for pocketbook
 
     local devices = {}
     for line in string.gmatch(output, "[^\r\n]+") do
@@ -124,7 +142,7 @@ function bluez:scanBluetoothDevices()
             rest = rest and rest:gsub("^%s+", ""):gsub("%s+$", "") or ""
             local dashMac = mac:gsub(":", "-")
             local name = (rest == "" or rest:upper() == dashMac:upper()) and "Unknown" or rest
-            table.insert(devices, { mac = mac, name = name })
+            table.insert(devices, Devices:fromScan(mac, name, self))
         end
     end
     return devices
@@ -133,7 +151,18 @@ end
 function bluez:search() --menu_items
     -- PocketBook-specific Bluetooth search logic
     logger.info("Searching for Bluetooth devices...")
-    local devices = self:scanBluetoothDevices()
+    local devices = self:scan()
+    logger.info("Found " .. #devices .. " devices")
+    return devices
+end
+
+function bluez:info(mac)
+    local cmd = "bluetoothctl info " .. mac
+    local handle = io.popen(cmd)
+    local output = handle:read("*a")
+    handle:close()
+
+    return output
 end
 
 return bluez
