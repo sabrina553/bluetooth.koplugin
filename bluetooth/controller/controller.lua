@@ -83,7 +83,7 @@ function controller:getDevice(mac)
     if not self.known_devices then
         return nil
     end
-    for _, dev in ipairs(self.knownDevices) do
+    for _, dev in ipairs(self.known_devices) do
         if dev.mac == mac then
             return dev
         end
