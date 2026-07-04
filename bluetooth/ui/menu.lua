@@ -2,8 +2,11 @@ local _ = require("gettext")
 
 local logger = require("logger")
 local Event = require("ui/event")
+local Menu = require("ui/widget/menu")
+local ButtonDialogTitle = require("ui/widget/buttondialogtitle")
 local InfoMessage = require("ui/widget/infomessage")
 local UIManager = require("ui/uimanager")
+
 local controller = require("bluetooth/controller/controller")
 
 local function displayName(dev)
