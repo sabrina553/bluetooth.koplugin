@@ -168,32 +168,6 @@ function controller:disconnect(dev)
     return dev:disconnect()
 end
 
----@param dev Devices|string
-function controller:pair(dev)
-    self:enableWhenDisabled()
-    if type(dev) == "string" then
-        dev = self:getDevice(dev)
-    end
-    if not dev then
-        logger.warn("controller:pair called with unknown device")
-        return
-    end
-    return dev:pair()
-end
-
----@param dev Devices|string
-function controller:remove(dev)
-    self:enableWhenDisabled()
-    if type(dev) == "string" then
-        dev = self:getDevice(dev)
-    end
-    if not dev then
-        logger.warn("controller:remove called with unknown device")
-        return
-    end
-    return dev:remove()
-end
-
 ---@param mac string
 function controller:info(mac)
     return self:callDeviceFunction("info", mac)
