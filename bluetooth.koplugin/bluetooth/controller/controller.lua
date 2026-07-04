@@ -90,44 +90,73 @@ function controller:getDevice(mac)
     return nil
 end
 
+
+---@param expected boolean 
+---@param callback fun(confirmed: boolean)|nil 
+---@param attempt integer|nil internal, do not pass
+local function pollField(self, field, expected, callback, attempt)
+    attempt = attempt or 1
+    local max_attempts = 10
+    local delay_s = 0.5
+
+    self:status()
+
+    if self[field] == expected then
+        if callback then callback(true) end
+        return
+    end
+
+    if attempt >= max_attempts then
+        logger.warn("Controller could not confirm connection state")
+        if callback then callback(false) end
+        return
+    end
+    UIManager:scheduleIn(delay_s, function()
+        pollField(self, field, expected, callback, attempt + 1)
+    end)
+end
+
+
 function controller:status()
     logger.info("Checking Bluetooth status")
     self.is_enabled = self:callDeviceFunction("status")
 end
 
-function controller:enable()
+function controller:enable(callback)
     self:callDeviceFunction("enable")
-    --self.is_enabled = self:status()
-    self.is_enabled = true
+    pollField(self, "is_enabled", true, callback)
 end
 
-function controller:disable()
+function controller:disable(callback)
     self:callDeviceFunction("disable")
-    --self.is_enabled = self:status()
-    self.is_enabled = false
+    pollField(self, "is_enabled", false, callback)
 end
 
-function controller:toggle()
-    if self.is_enabled == true then
-        self:disable()
+function controller:toggle(callback)
+    self:status()
+    if self.is_enabled then
+        return self:disable(callback)
     else
-        self:enable()
+        return self:enable(callback)
     end
 end
 
-function controller:enableWhenDisabled()
+function controller:enableWhenDisabled(callback)
+    self:status()
     if not self.is_enabled then
-        self:enable()
+        self:enable(callback)
+    else
+        callback(true)
     end
 end
 
 --- Refreshes and returns the list of known Devices instances. @return Devices[]
 ---
-function controller:knownDevices()
+function controller:knownDevices(callback)
     logger.info("Refreshing known devices")
 
     if self.backend == backends.PocketBook then -- and something so this only runs on init?
-        self:enableWhenDisabled()
+        self:enableWhenDisabled(callback)
     end
 
     self.known_devices = self:callDeviceFunction("knownDevices") or {}
@@ -140,8 +169,8 @@ end
 
 --- Scans for devices and merges any newly-found ones into knownDevices. @return Devices[]
 ---
-function controller:search(duration)
-    self:enableWhenDisabled()
+function controller:search(callback, duration)
+    self:enableWhenDisabled(callback)
     self:callDeviceFunction("search", duration)
 end
 
