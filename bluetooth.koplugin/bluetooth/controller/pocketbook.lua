@@ -90,7 +90,7 @@ function pocketbook:scan()
 end
 
 function pocketbook:search()
-    return self:scan()
+    return Bluez:search()
 end
 
 function pocketbook:info(mac)
