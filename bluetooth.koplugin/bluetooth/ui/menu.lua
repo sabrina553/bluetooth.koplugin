@@ -66,15 +66,33 @@ function BluetoothMenu:addToMainMenu(menu_items)
     }
 end
 
-function BluetoothMenu:getTopMenu()
+--- Rebuilds the full item table from current controller/device state and
+--- pushes it into the given (or last-known) touchmenu_instance, then
+--- redraws. Call this any time state changes instead of calling
+--- touchmenu_instance:updateItems() directly, since updateItems() alone
+--- only re-renders the *existing* item_table (stale checked_func closures,
+--- no newly paired devices, etc.).
+function BluetoothMenu:refreshMenu(touchmenu_instance)
+    touchmenu_instance = touchmenu_instance or self.touchmenu_instance
+    if not touchmenu_instance then
+        return
+    end
+    touchmenu_instance.item_table = self:buildMenuTable()
+    touchmenu_instance:updateItems()
+end
+
+--- Builds the full Bluetooth submenu item table from current state.
+function BluetoothMenu:buildMenuTable()
     local menu = {
         {
             text = _("Bluetooth"),
             callback = function(touchmenu_instance)
                 self.controller:toggle(function(confirmed)
-                if touchmenu_instance then
-                    touchmenu_instance:updateItems()
-                end
+                    -- Re-query every known device's info so their
+                    -- connected/paired/etc fields reflect the new
+                    -- power state, then rebuild the menu to show it.
+                    self.controller:knownDevices()
+                    self:refreshMenu(touchmenu_instance)
             end)
         end,
             checked_func = function()
@@ -86,28 +104,28 @@ function BluetoothMenu:getTopMenu()
             text = _("Search Bluetooth"),
             callback = function(touchmenu_instance)
                 self:showSearchResults(function(confirmed)
-                if touchmenu_instance then
-                        touchmenu_instance:updateItems()
-                    end
+                    self:refreshMenu(touchmenu_instance)
                 end)
             end,
             keep_menu_open = true,
             separator = true,
         }
     }
-    self:refreshKnownDevicesAsync()
-    self:pairedDevices(menu, self.controller.known_devices)
 
+    self:pairedDevices(menu, self.controller.known_devices)
     return menu
+end
+
+function BluetoothMenu:getTopMenu()
+    self:refreshKnownDevicesAsync()
+    return self:buildMenuTable()
 end
 
 function BluetoothMenu:refreshKnownDevicesAsync()
     UIManager:scheduleIn(0, function()
         self.controller:status()
         self.controller:knownDevices()
-        if self.touchmenu_instance then
-            self.touchmenu_instance:updateItems()
-        end
+        self:refreshMenu()
     end)
 end
 
@@ -137,7 +155,7 @@ function BluetoothMenu:pairedDevices(menu, knownDevices)
                                 })
                             elseif not dev.connected then
                                 UIManager:show(InfoMessage:new{
-                                    text = _("Disonnected from ") .. dev.name,
+                                    text = _("Disconnected from ") .. dev.name,
                                     timeout = 1,
                                 })
                             else
@@ -147,9 +165,7 @@ function BluetoothMenu:pairedDevices(menu, knownDevices)
                                 })
                             end
 
-                            if touchmenu_instance then
-                                touchmenu_instance:updateItems()
-                            end
+                            self:refreshMenu(touchmenu_instance)
                         end)
                     end,
                     checked_func = function()
@@ -261,9 +277,7 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
 
                         }
                         UIManager:show(info_msg)
-                        if touchmenu_instance then
-                            touchmenu_instance:updateItems()
-                        end
+                        self:refreshMenu(touchmenu_instance)
                     end,
                 },
                 {
@@ -277,10 +291,7 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
                                     timeout = 2,
                                 })
                             end
-                            if touchmenu_instance then
-                                touchmenu_instance:updateItems()
-                            end
-
+                            self:refreshMenu(touchmenu_instance)
                         end)
                     end,
                 },
@@ -295,9 +306,7 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
                                     timeout = 2,
                                 })
                             end
-                            if touchmenu_instance then
-                                touchmenu_instance:updateItems()
-                            end
+                            self:refreshMenu(touchmenu_instance)
                         end)
                     end,
                 },
@@ -312,9 +321,7 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
                                     timeout = 2,
                                 })
                             end
-                            if touchmenu_instance then
-                                touchmenu_instance:updateItems()
-                            end
+                            self:refreshMenu(touchmenu_instance)
                         end)
                     end,
                     separator = true,
@@ -323,7 +330,7 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
             },
             {
                 {
-                    text = dev.connected and _("Disonnect") or _("Connect"),
+                    text = dev.connected and _("Disconnect") or _("Connect"),
                     callback = function()
                         UIManager:close(dialog)
                         dev:toggleConnection(function(confirmed)
@@ -333,9 +340,7 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
                                     timeout = 2,
                                 })
                             end
-                            if touchmenu_instance then
-                                touchmenu_instance:updateItems()
-                            end
+                            self:refreshMenu(touchmenu_instance)
                         end)
                     end,
                 },
