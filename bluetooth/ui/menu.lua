@@ -6,10 +6,47 @@ local InfoMessage = require("ui/widget/infomessage")
 local UIManager = require("ui/uimanager")
 local controller = require("bluetooth/controller/controller")
 
+local function displayName(dev)
+    if dev.name and dev.name ~= "" then
+        return dev.name
+    end
+    return dev.mac
+end
+
+local function isNamed(dev)
+    return dev.name ~= nil and dev.name ~= ""
+end
+
+local function buildItemTable(devices)
+    local sorted = {}
+    for _, dev in ipairs(devices or {}) do
+        if not dev.paired then
+            table.insert(sorted, dev)
+        end
+    end
+    table.sort(sorted, function(a, b)
+        local a_named, b_named = isNamed(a), isNamed(b)
+        if a_named ~= b_named then
+            return a_named -- named devices float to the top
+        end
+        if a_named then
+            return a.name:lower() < b.name:lower()
+        end
+        return a.mac < b.mac
+    end)
+
+    local item_table = {}
+    for _, dev in ipairs(sorted) do
+        table.insert(item_table, { text = displayName(dev), dev = dev })
+    end
+    return item_table
+end
 
 ---@class BluetoothMenu
 ---@field ui any This is a ReaderUI
 ---@field controller any
+---@field devices any
+---@field menu_instance any
 local BluetoothMenu = {}
 
 function BluetoothMenu:new(o)
