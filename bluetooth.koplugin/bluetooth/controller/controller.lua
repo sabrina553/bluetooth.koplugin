@@ -6,7 +6,6 @@ local _ = require("gettext")
 
 local PocketBook = require("bluetooth/controller/pocketbook")
 local Bluez = require("bluetooth/controller/bluez")
-local BTdevices = require("bluetooth/controller/devices")
 
 ---@class controller
 ---@field type string
@@ -37,7 +36,7 @@ local backends = {
 
 function controller:init()
     self.type = self:Devicetype()
-    
+
     if not backends then
         backends = {
             PocketBook = PocketBook:new(self),
@@ -45,7 +44,7 @@ function controller:init()
         }
     end
     self.backend = backends[self.type]
-    
+
     self.is_enabled = self:status()
     self:knownDevices()
     -- self.is_scanning = false
@@ -95,14 +94,6 @@ function controller:status()
     return self:callDeviceFunction("status")
 end
 
-function controller:toggle()
-    if self.is_enabled == true then
-        self:disable()
-    else
-        self:enable()
-    end
-end
-
 function controller:enable()
     self:callDeviceFunction("enable")
     --self.is_enabled = self:status()
@@ -113,6 +104,14 @@ function controller:disable()
     self:callDeviceFunction("disable")
     --self.is_enabled = self:status()
     self.is_enabled = false
+end
+
+function controller:toggle()
+    if self.is_enabled == true then
+        self:disable()
+    else
+        self:enable()
+    end
 end
 
 function controller:enableWhenDisabled()
@@ -126,7 +125,7 @@ end
 function controller:knownDevices()
     logger.info("Refreshing known devices")
 
-    if self.backend == backends.PocketBook then
+    if self.backend == backends.PocketBook then -- and something so this only runs on init?
         self:enableWhenDisabled()
     end
 
@@ -145,70 +144,9 @@ function controller:search(duration)
     self:callDeviceFunction("search", duration)
 end
 
-
--- The connect/disconnect/pair/unpair/remove/info actions below now prefer
--- operating directly on a Devices object (since each Devices instance
--- knows its own backend and can act on itself). The mac-address versions
--- are kept for callers that only have a mac string, and simply look up or
--- construct the Devices object first.
-
----@param dev Devices|string
----@param callback fun(confirmed: boolean)|nil
-function controller:connect(dev, callback)
-    self:enableWhenDisabled()
-    if type(dev) == "string" then
-        dev = self:getDevice(dev)
-    end
-    if not dev then
-        logger.warn("controller:connect called with unknown device")
-        if callback then callback(false) end
-        return
-    end
-    dev:connect(callback)
-end
-
----@param dev Devices|string
----@param callback fun(confirmed: boolean)|nil
-function controller:disconnect(dev, callback)
-    if type(dev) == "string" then
-        dev = self:getDevice(dev)
-    end
-    if not dev then
-        logger.warn("controller:disconnect called with unknown device")
-        if callback then callback(false) end
-        return
-    end
-    return dev:disconnect()
-end
-
 ---@param mac string
 function controller:info(mac)
     return self:callDeviceFunction("info", mac)
 end
 
 return controller
-
--- ---@param dev Devices|string
--- function controller:pair(dev)
---     self:enableWhenDisabled()
---     if type(dev) == "string" then
---         dev = self:getDevice(dev)
---     end
---     if not dev then
---         logger.warn("controller:pair called with unknown device")
---         return
---     end
---     return dev:pair()
--- end
-
--- ---@param dev Devices|string
--- function controller:unpair(dev)
---     if type(dev) == "string" then
---         dev = self:getDevice(dev)
---     end
---     if not dev then
---         logger.warn("controller:unpair called with unknown device")
---         return
---     end
---     return dev:unpair()
--- end
