@@ -57,13 +57,121 @@ function BluetoothMenu:getTopMenu()
         for _, dev in ipairs(knownDevices) do
             -- Insert the menu item
             table.insert(menu, {
-                text = string.format(dev.connected and (dev.name .. " (connected)") or dev.name),
-                callback = function()
-                    -- Each Devices instance knows its own backend, so it
-                    -- can connect itself without going back through the
-                    -- controller with a raw mac address.
-                    dev:connect()
-                end,
+                    text = dev.name,
+                    callback = function(touchmenu_instance)
+
+                        local msg
+                        if dev.connected then
+                            msg = InfoMessage:new{ text = _("Disconnecting…") }
+                        else
+                            msg = InfoMessage:new{ text = _("Connecting…") }
+                        end
+                        UIManager:show(msg)
+                        dev:toggleConnection(function(confirmed)
+                            UIManager:close(msg)
+                            if confirmed and dev.connected then
+                                UIManager:show(InfoMessage:new{
+                                    text = _("Connected to ") .. dev.name,
+                                    timeout = 1,
+                                })
+                            elseif not dev.connected then
+                                UIManager:show(InfoMessage:new{
+                                    text = _("Disonnected from ") .. dev.name,
+                                    timeout = 1,
+                                })
+                            else
+                                UIManager:show(InfoMessage:new{
+                                    text = _("Could not confirm connection to ") .. dev.name,
+                                    timeout = 2,
+                                })
+                            end
+                            
+                            if touchmenu_instance then
+                                touchmenu_instance:updateItems()
+                            end
+                        end)
+                    end,
+                    checked_func = function()
+                        return dev.connected
+                    end,
+                    hold_callback = function(touchmenu_instance)
+                        self:showDeviceActions(dev, touchmenu_instance)
+                    end,
+                    keep_menu_open = true,
+                })
+            end
+        end
+    end
+end
+
+function BluetoothMenu:showSearchResults(touchmenu_instance)
+    local scan_duration = 15
+    local poll_interval = 1
+
+    self.controller:search(scan_duration)
+    self.search_menu_closed = false
+
+    self.search_menu = Menu:new{
+        title = _("Searching for devices…"),
+        item_table = buildItemTable(self.controller.known_devices),
+        onMenuSelect = function(_, item)
+            self:pairFoundDevice(item.dev, touchmenu_instance)
+        end,
+        close_callback = function()
+            self.search_menu_closed = true
+            UIManager:close(self.search_menu)
+        end,
+    }
+    UIManager:show(self.search_menu)
+
+    local elapsed = 0
+    local function poll()
+        if self.search_menu_closed then
+            return
+        end
+        elapsed = elapsed + poll_interval
+        self.controller:knownDevices() -- re-shells bluetoothctl devices + refreshes each dev
+        local done = elapsed >= scan_duration
+        self.search_menu:switchItemTable(
+            done and _("Search complete") or _("Searching for devices…"),
+            buildItemTable(self.controller.known_devices)
+        )
+        if not done then
+            UIManager:scheduleIn(poll_interval, poll)
+        end
+    end
+    UIManager:scheduleIn(poll_interval, poll)
+end
+
+function BluetoothMenu:pairFoundDevice(dev, touchmenu_instance)
+    if dev.paired then
+        return -- already paired, nothing to do from here
+    end
+
+    local msg = InfoMessage:new{ text = _("Pairing with ") .. displayName(dev) .. "…" }
+    UIManager:show(msg)
+
+    dev:pair(function(confirmed)
+        UIManager:close(msg)
+        if confirmed then
+            UIManager:show(InfoMessage:new{
+                text = _("Paired with ") .. displayName(dev),
+                timeout = 1,
+            })
+            local already_known = false
+            for _, known in ipairs(self.controller.known_devices or {}) do
+                if known.mac == dev.mac then
+                    already_known = true
+                    break
+                end
+            end
+            if not already_known then
+                table.insert(self.controller.known_devices, dev)
+            end
+        else
+            UIManager:show(InfoMessage:new{
+                text = _("Could not confirm pairing with ") .. displayName(dev),
+                timeout = 2,
             })
         end
         if touchmenu_instance then
