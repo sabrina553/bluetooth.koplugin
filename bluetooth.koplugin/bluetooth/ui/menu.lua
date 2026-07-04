@@ -76,7 +76,7 @@ function BluetoothMenu:getTopMenu()
                     touchmenu_instance:updateItems()
                 end
             end)
-            end,
+        end,
             checked_func = function()
                 return self.controller.is_enabled
             end,
