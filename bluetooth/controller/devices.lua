@@ -8,6 +8,7 @@ local logger = require("logger")
 ---@field trusted boolean
 ---@field blocked boolean
 ---@field connected boolean
+---@field controller any
 ---@field backend any The platform backend (Bluez, PocketBook, ...) used to actually talk to hardware
 local Devices = {}
 Devices.__index = Devices
@@ -37,18 +38,16 @@ end
 
 --- Build a Devices instance from a raw "mac, name" pair, as produced by
 --- scanning/listing known devices.
-function Devices:fromScan(mac, name, backend)
-    return Devices:new({ mac = mac, name = name, backend = backend })
+---@field controller any
+function Devices:fromScan(mac, name, backend, ctrl)
+    return Devices:new({ mac = mac, name = name, backend = backend, controller = ctrl })
 end
 
 --- Populate fields from `bluetoothctl info <mac>` style output.
 function Devices:parseInfo(output)
     self.mac = output:match("Device (%w+:%w+:%w+:%w+:%w+:%w+)") or self.mac
 
-    self.name = output:match("Name: (%w+)")
-    if not self.name then
-        self.name = output:match("Alias: (%w+)")
-    end
+    self.name = output:match("^(Name: |Alias: )(.*)\n") or self.name
 
     local paired = output:match("Paired: (%w+)")
     self.paired = paired and (paired == "yes") or false
@@ -64,7 +63,6 @@ function Devices:parseInfo(output)
 
     local connected = output:match("Connected: (%w+)")
     self.connected = connected and (connected == "yes") or false
-
     return self
 end
 
@@ -74,10 +72,12 @@ function Devices:refresh()
         logger.warn("Devices:refresh called with no backend set on device " .. tostring(self.mac))
         return self
     end
+
     local output = self.backend:info(self.mac)
     if output then
         self:parseInfo(output)
     end
+
     return self
 end
 
