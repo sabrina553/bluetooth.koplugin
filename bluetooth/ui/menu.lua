@@ -95,8 +95,21 @@ function BluetoothMenu:getTopMenu()
         }
     }
 
-    local knownDevices = self.controller.knownDevices
+    self:pairedDevices(menu, self.controller.known_devices)
+    self:refreshKnownDevicesAsync()
+    return menu
+end
 
+function BluetoothMenu:refreshKnownDevicesAsync()
+    UIManager:scheduleIn(0, function()
+        self.controller:knownDevices()
+        if self.touchmenu_instance then
+            self.touchmenu_instance:updateItems()
+        end
+    end)
+end
+
+function BluetoothMenu:pairedDevices(menu, knownDevices)
     if knownDevices ~= nil then
         -- Iterate over the known Devices objects
         for _, dev in ipairs(knownDevices) do
