@@ -37,12 +37,21 @@ local backends = {
 
 function controller:init()
     self.type = self:Devicetype()
+    
+    if not backends then
+        backends = {
+            PocketBook = PocketBook:new(self),
+            Bluez = Bluez:new(self),
+        }
+    end
     self.backend = backends[self.type]
+    
     self.is_enabled = self:status()
-    self.knownDevices = self:knownDevices()
+    self:knownDevices()
     -- self.is_scanning = false
     -- self.is_connected = false
     -- self.is_disconnected = false
+    logger:dbg("Bluetooth.koplugin.Controller Initialized")
 end
 
 function controller:Devicetype()
@@ -71,7 +80,7 @@ end
 ---@param mac string
 ---@return Devices|nil
 function controller:getDevice(mac)
-    if not self.knownDevices then
+    if not self.known_devices then
         return nil
     end
     for _, dev in ipairs(self.knownDevices) do
