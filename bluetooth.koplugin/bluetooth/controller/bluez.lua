@@ -70,12 +70,12 @@ end
 
 function bluez:enable()
     logger.info("Enabling Bluetooth...")
-    os.execute('bluetoothctl power on &')
+    os.execute('bluetoothctl power on')
 end
 
 function bluez:disable()
     logger.info("Disabling Bluetooth...")
-    os.execute('bluetoothctl power off &')
+    os.execute('bluetoothctl power off')
 end
 
 function bluez:pair(mac)
@@ -106,7 +106,6 @@ function bluez:disconnect(mac)
     os.execute('bluetoothctl disconnect ' .. mac .. ' &')
 end
 
-
 --- Parses one line of `bluetoothctl devices`/scan-style output of the form
 --- "Device AA:BB:CC:DD:EE:FF Some Name" (with an optional [NEW] prefix
 --- handled by the caller). Returns mac, name or nil if the line doesn't match.
@@ -136,35 +135,6 @@ function bluez:knownDevices()
     logger.info("Found " .. #devices .. " known devices")
     return devices
 end
-
-function bluez:scan()
-    local handle = io.popen("bluetoothctl -t 4 scan on")
-    local output = handle:read("*a")
-    handle:close()
-
-    output = output:gsub("\27%[[%d;]*m", "") -- This Strips ANSI escape/color codes (e.g. ESC[0;92m ... ESC[0m)
-    output = output:gsub("[\1-\2]", "") -- this strips unicode 01, 02 for pocketbook
-
-    local devices = {}
-    for line in string.gmatch(output, "[^\r\n]+") do
-        local mac, rest = string.match(line, "%[NEW%] Device (%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)%s+(.*)")
-        if mac then
-            rest = rest and rest:gsub("^%s+", ""):gsub("%s+$", "") or ""
-            local dashMac = mac:gsub(":", "-")
-            local name = (rest == "" or rest:upper() == dashMac:upper()) and "Unknown" or rest
-            table.insert(devices, Devices:fromScan(mac, name, self))
-        end
-    end
-    return devices
-end
-
--- function bluez:search() --menu_items
---     -- PocketBook-specific Bluetooth search logic
---     logger.info("Searching for Bluetooth devices...")
---     local devices = self:scan()
---     logger.info("Found " .. #devices .. " devices")
---     return devices
--- end
 
 function bluez:search(duration)
     duration = duration or 15
