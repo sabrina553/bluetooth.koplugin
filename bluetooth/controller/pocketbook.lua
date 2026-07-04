@@ -14,28 +14,32 @@ local Bluez = require("bluetooth/controller/bluez")
 
 local pocketbook = {}
 
-function pocketbook:new()
+function pocketbook:new(ctrl)
     self.__index = self
-    return setmetatable({}, self)
+    return setmetatable({ controller = ctrl }, self)
 end
 
--- netagent bt status
---  when bt is off, the state is BT_STATE_OFF,
---  when on, it may be BT_STATE_ON, BT_STATE_READY, etc
---  so just check for OFF
+local function execOk(cmd)
+    local ok, exit_type, code = os.execute(cmd)
+    if type(ok) == "number" then
+        return ok == 0          -- Lua 5.1
+    end
+    return ok == true or code == 0  -- Lua 5.2+
+end
+
 function pocketbook:isOn()
     logger.info("Checking Bluetooth status isOn..")
-    return os.execute('netagent bt status | grep BT_STATE_ON') == 0
+    return execOk('netagent bt status | grep BT_STATE_ON')
 end
 
 function pocketbook:isOff()
     logger.info("Checking Bluetooth status isOff..")
-    return os.execute('netagent bt status | grep BT_STATE_OFF') == 0
+    return execOk('netagent bt status | grep BT_STATE_OFF')
 end
 
 function pocketbook:isReady()
     logger.info("Checking Bluetooth status isReady..")
-    return os.execute('netagent bt status | grep BT_STATE_READY') == 0
+    return execOk('netagent bt status | grep BT_STATE_READY')
 end
 
 function pocketbook:status()

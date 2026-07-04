@@ -37,17 +37,25 @@ local Devices = require("bluetooth/controller/devices")
 
 local bluez = {}
 
-function bluez:new()
+function bluez:new(ctrl)
     self.__index = self
-    return setmetatable({}, self)
+    return setmetatable({ controller = ctrl }, self)
+end
+
+local function execOk(cmd)
+    local ok, exit_type, code = os.execute(cmd)
+    if type(ok) == "number" then
+        return ok == 0          -- Lua 5.1
+    end
+    return ok == true or code == 0  -- Lua 5.2+
 end
 
 function bluez:isOn()
-    return os.execute('bluetoothctl show  | grep -o "Powered: yes"') == 0
+    return execOk('bluetoothctl show  | grep -o "Powered: yes"')
 end
 
 function bluez:isOff()
-    return os.execute('bluetoothctl show  | grep -o "Powered: no"') == 0
+    return execOk('bluetoothctl show  | grep -o "Powered: no"')
 end
 
 function bluez:status()
