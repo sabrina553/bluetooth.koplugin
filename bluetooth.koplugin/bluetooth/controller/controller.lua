@@ -35,7 +35,7 @@ local backends = {
 }
 
 function controller:init()
-    self.type = self:Devicetype()
+    self:Devicetype()
 
     if not backends then
         backends = {
@@ -45,7 +45,7 @@ function controller:init()
     end
     self.backend = backends[self.type]
 
-    self.is_enabled = self:status()
+    self:status()
     self:knownDevices()
     -- self.is_scanning = false
     -- self.is_connected = false
@@ -55,15 +55,15 @@ end
 
 function controller:Devicetype()
     if Device:isAndroid() then
-        return "Android"
+        self.type = "Android"
     elseif Device:isPocketBook() then
-        return "PocketBook"
+        self.type = "PocketBook"
     elseif Device:isEmulator() or Device:isDesktop() then
-        return "Bluez"
+        self.type = "Bluez"
     elseif Device:isKindle() then
-        return "Kindle"
+        self.type = "Kindle"
     elseif Device:isKobo() then
-        return "Kobo"
+        self.type = "Kobo"
     end
 end
 
@@ -91,7 +91,8 @@ function controller:getDevice(mac)
 end
 
 function controller:status()
-    return self:callDeviceFunction("status")
+    logger.info("Checking Bluetooth status")
+    self.is_enabled = self:callDeviceFunction("status")
 end
 
 function controller:enable()
