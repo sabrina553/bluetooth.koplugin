@@ -76,6 +76,9 @@ function BluetoothMenu:getTopMenu()
             text = _("Bluetooth"),
             callback = function()
                 self.controller:toggle()
+                if touchmenu_instance then
+                    touchmenu_instance:updateItems()
+                end
             end,
             checked_func = function()
                 return self.controller.is_enabled
@@ -84,9 +87,10 @@ function BluetoothMenu:getTopMenu()
         },
         {
             text = _("Search Bluetooth"),
-            callback = function()
-                self.controller:search()
+            callback = function(touchmenu_instance)
+                self:showSearchResults(touchmenu_instance)
             end,
+            keep_menu_open = true,
             separator = true,
         }
     }
