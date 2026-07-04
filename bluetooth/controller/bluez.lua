@@ -133,7 +133,7 @@ function bluez:knownDevices()
             table.insert(devices, Devices:fromScan(mac, name, self))
         end
     end
-
+    logger.info("Found " .. #devices .. " known devices")
     return devices
 end
 
@@ -158,12 +158,18 @@ function bluez:scan()
     return devices
 end
 
-function bluez:search() --menu_items
-    -- PocketBook-specific Bluetooth search logic
-    logger.info("Searching for Bluetooth devices...")
-    local devices = self:scan()
-    logger.info("Found " .. #devices .. " devices")
-    return devices
+-- function bluez:search() --menu_items
+--     -- PocketBook-specific Bluetooth search logic
+--     logger.info("Searching for Bluetooth devices...")
+--     local devices = self:scan()
+--     logger.info("Found " .. #devices .. " devices")
+--     return devices
+-- end
+
+function bluez:search(duration)
+    duration = duration or 15
+    logger.info("Starting background Bluetooth scan for " .. duration .. "s")
+    os.execute(string.format('bluetoothctl --timeout %d scan on &', duration))
 end
 
 function bluez:info(mac)
