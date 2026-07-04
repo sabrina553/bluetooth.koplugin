@@ -47,7 +47,7 @@ function Bluetooth:onSuspend()
 end
 
 function Bluetooth:onPause()
-    logger.info("Device pasung, disabling bluetooth")
+    logger.info("Device pausing, disabling bluetooth")
     self.controller:disable()
 end
 
