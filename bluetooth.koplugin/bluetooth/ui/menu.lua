@@ -1,13 +1,9 @@
 local _ = require("gettext")
 
-local logger = require("logger")
-local Event = require("ui/event")
 local Menu = require("ui/widget/menu")
 local InfoMessage = require("ui/widget/infomessage")
 local ButtonDialogTitle = require("ui/widget/buttondialogtitle")
 local UIManager = require("ui/uimanager")
-
-local controller = require("bluetooth/controller/controller")
 
 local function displayName(dev)
     if dev.name and dev.name ~= "" then
@@ -144,7 +140,7 @@ function BluetoothMenu:pairedDevices(menu, knownDevices)
                                     timeout = 2,
                                 })
                             end
-                            
+
                             if touchmenu_instance then
                                 touchmenu_instance:updateItems()
                             end
@@ -256,7 +252,7 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
                                    _("Connected: ") .. tostring(dev.connected) .. "\n" ..
                                    _("Trusted: ") .. tostring(dev.trusted) .. "\n" ..
                                    _("Blocked: ") .. tostring(dev.blocked),
-                            
+
                         }
                         UIManager:show(info_msg)
                         if touchmenu_instance then
@@ -278,7 +274,7 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
                             if touchmenu_instance then
                                 touchmenu_instance:updateItems()
                             end
-                            
+
                         end)
                     end,
                 },
