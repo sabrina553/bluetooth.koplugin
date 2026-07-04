@@ -184,23 +184,41 @@ function Devices:untrust(callback)
     pollField(self, "trusted", false, callback)
 end
 
-function Devices:disconnect()
-    if not self.backend then
-        logger.warn("Devices:disconnect called with no backend set on device " .. tostring(self.mac))
-        return
+function Devices:toggleTrust(callback)
+    if self.trusted then
+        return self:untrust(callback)
+    else
+        return self:trust(callback)
     end
-    self.backend:disconnect(self.mac)
-    self.connected = false
 end
 
-function Devices:remove()
-    if not self.backend or not self.backend.remove then
-        logger.warn("Devices:remove called with no backend set on device " .. tostring(self.mac))
+function Devices:block(callback)
+    if not self.backend then
+        logger.warn("Devices:block called with no backend set on device " .. tostring(self.mac))
+        if callback then callback(false) end
         return
     end
-    self.backend:remove(self.mac)
-    self.paired = false
-    self.connected = false
+    self.backend:block(self.mac)
+    pollField(self, "blocked", true, callback)
 end
+
+function Devices:unblock(callback)
+    if not self.backend then
+        logger.warn("Devices:unblock called with no backend set on device " .. tostring(self.mac))
+        if callback then callback(false) end
+        return
+    end
+    self.backend:unblock(self.mac)
+    pollField(self, "blocked", false, callback)
+end
+
+function Devices:toggleBlock(callback)
+    if self.blocked then
+        return self:unblock(callback)
+    else
+        return self:block(callback)
+    end
+end
+
 
 return Devices
