@@ -106,6 +106,26 @@ function bluez:disconnect(mac)
     os.execute('bluetoothctl disconnect ' .. mac .. ' &')
 end
 
+function bluez:trust(mac)
+    logger.info("Trusting Bluetooth device: " .. mac)
+    os.execute('bluetoothctl trust ' .. mac .. ' &')
+end
+
+function bluez:untrust(mac)
+    logger.info("Untrusting Bluetooth device: " .. mac)
+    os.execute('bluetoothctl untrust ' .. mac .. ' &')
+end
+
+function bluez:block(mac)
+    logger.info("Blocking Bluetooth device: " .. mac)
+    os.execute('bluetoothctl block ' .. mac .. ' &')
+end
+
+function bluez:unblock(mac)
+    logger.info("Unblocking Bluetooth device: " .. mac)
+    os.execute('bluetoothctl unblock ' .. mac .. ' &')
+end
+
 --- Parses one line of `bluetoothctl devices`/scan-style output of the form
 --- "Device AA:BB:CC:DD:EE:FF Some Name" (with an optional [NEW] prefix
 --- handled by the caller). Returns mac, name or nil if the line doesn't match.

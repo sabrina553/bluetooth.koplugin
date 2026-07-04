@@ -81,6 +81,22 @@ function pocketbook:disconnect(mac)
     Bluez:disconnect(mac)
 end
 
+function pocketbook:trust(mac)
+    Bluez:trust(mac)
+end
+
+function pocketbook:untrust(mac)
+    Bluez:untrust(mac)
+end
+
+function pocketbook:block(mac)
+    Bluez:block(mac)
+end
+
+function pocketbook:unblock(mac)
+    Bluez:unblock(mac)
+end
+
 function pocketbook:knownDevices()
     return Bluez:knownDevices()
 end
@@ -90,6 +106,7 @@ function pocketbook:scan()
 end
 
 function pocketbook:search()
+    --return self:scan()
     return Bluez:search()
 end
 
