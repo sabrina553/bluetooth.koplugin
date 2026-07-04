@@ -164,13 +164,24 @@ function Devices:togglePair(callback)
     end
 end
 
-function Devices:connect()
+function Devices:trust(callback)
     if not self.backend then
-        logger.warn("Devices:connect called with no backend set on device " .. tostring(self.mac))
+        logger.warn("Devices:trust called with no backend set on device " .. tostring(self.mac))
+        if callback then callback(false) end
         return
     end
-    self.backend:connect(self.mac)
-    self.connected = true
+    self.backend:trust(self.mac)
+    pollField(self, "trusted", true, callback)
+end
+
+function Devices:untrust(callback)
+    if not self.backend then
+        logger.warn("Devices:unpair called with no backend set on device " .. tostring(self.mac))
+        if callback then callback(false) end
+        return
+    end
+    self.backend:untrust(self.mac)
+    pollField(self, "trusted", false, callback)
 end
 
 function Devices:disconnect()
