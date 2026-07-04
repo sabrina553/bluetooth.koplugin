@@ -63,7 +63,8 @@ function BluetoothMenu:addToMainMenu(menu_items)
     menu_items.bluetooth = {
         text = "Bluetooth",
         sorting_hint = "tools",
-        sub_item_table_func = function()
+        sub_item_table_func = function(touchmenu_instance)
+            self.touchmenu_instance = touchmenu_instance
             return self:getTopMenu()
         end,
     }
