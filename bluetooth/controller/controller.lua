@@ -196,7 +196,6 @@ end
 
 ---@param mac string
 function controller:info(mac)
-    self:enableWhenDisabled()
     return self:callDeviceFunction("info", mac)
 end
 
