@@ -112,27 +112,28 @@ function controller:enableWhenDisabled()
     end
 end
 
---- Refreshes and returns the list of known Devices instances.
----@return Devices[]
+--- Refreshes and returns the list of known Devices instances. @return Devices[]
+---
 function controller:knownDevices()
-    self.knownDevices = self:callDeviceFunction("knownDevices") or {}
-    return self.knownDevices
-end
+    logger.info("Refreshing known devices")
 
---- Scans for devices and merges any newly-found ones into knownDevices.
----@return Devices[]
-function controller:search()
-    self:enableWhenDisabled()
-    local found = self:callDeviceFunction("search") or {}
-
-    self.knownDevices = self.knownDevices or {}
-    for _, dev in ipairs(found) do
-        if not self:getDevice(dev.mac) then
-            table.insert(self.knownDevices, dev)
-        end
+    if self.backend == backends.PocketBook then
+        self:enableWhenDisabled()
     end
 
-    return found
+    self.known_devices = self:callDeviceFunction("knownDevices") or {}
+    logger.info(#self.known_devices)
+    for _, dev in ipairs(self.known_devices) do
+        dev:refresh()
+    end
+    return self.known_devices
+end
+
+--- Scans for devices and merges any newly-found ones into knownDevices. @return Devices[]
+---
+function controller:search(duration)
+    self:enableWhenDisabled()
+    self:callDeviceFunction("search", duration)
 end
 
 
