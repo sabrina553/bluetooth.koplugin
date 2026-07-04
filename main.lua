@@ -6,24 +6,29 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 
 local BluetoothMenu = require("bluetooth/ui/menu")
 local controller = require("bluetooth/controller/controller")
-
+local devices = require("bluetooth/controller/devices")
 
 ---@class Bluetooth
 ---@field ui any This is a ReaderUI
 ---@field controller any
+---@field devices any
 local Bluetooth = WidgetContainer:extend {
     name = "Bluetooth",
     is_doc_only = false,
     menu = nil,
     controller = nil,
+    devices = nil,
 }
 
 function Bluetooth:init()
-    self.controller = controller:new()
-
+    --self.devices = devices:new({})
+    self.controller = controller:new({
+        devices = self.devices
+    })
     self.menu = BluetoothMenu:new({
         ui = self.ui,
-        controller = self.controller
+        controller = self.controller,
+        devices = self.devices,
     })
 
     self.ui.menu:registerToMainMenu(self.menu)
@@ -48,7 +53,7 @@ end
 
 function Bluetooth:onResume()
     logger.info("Device resumed, Restoring Bluetooth")
-    self.controller:enable()
+    self.controller:enableWhenDisabled()
 end
 
 return Bluetooth
