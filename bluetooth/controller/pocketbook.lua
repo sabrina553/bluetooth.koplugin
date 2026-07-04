@@ -5,8 +5,11 @@
 ---  commands that work (on my ereader)
 ---    netagent bt on
 ---    netagent bt off
----    netagent bt status
----
+--     netagent bt status
+
+--  when bt is off, the state is BT_STATE_OFF,
+--  when on, it may be BT_STATE_ON, BT_STATE_READY, etc
+--  so just check for OFF
 --]]--
 
 local logger = require("logger")
@@ -44,22 +47,22 @@ end
 
 function pocketbook:status()
     if self:isOff() then
+        logger.info("Bluetooth is OFF")
         return false
     else
+        logger.info("Bluetooth is ON")
         return true
     end
 end
 
-function pocketbook:enable() --menu_items
-    -- PocketBook-specific Bluetooth connection logic
+function pocketbook:enable()
     logger.info("Enabling Bluetooth...")
-    os.execute('netagent bt on &')
+    os.execute('netagent bt on')
 end
 
-function pocketbook:disable() --menu_items
-    -- PocketBook-specific Bluetooth disconnection logic
+function pocketbook:disable()
     logger.info("Disabling Bluetooth...")
-    os.execute('netagent bt off &')
+    os.execute('netagent bt off')
 end
 
 function pocketbook:pair(mac)
@@ -86,8 +89,7 @@ function pocketbook:scan()
     return Bluez:scan()
 end
 
-function pocketbook:search() --menu_items
-    logger.info("Searching for Bluetooth devices...")
+function pocketbook:search()
     return self:scan()
 end
 
