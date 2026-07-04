@@ -3,8 +3,8 @@ local _ = require("gettext")
 local logger = require("logger")
 local Event = require("ui/event")
 local Menu = require("ui/widget/menu")
-local ButtonDialogTitle = require("ui/widget/buttondialogtitle")
 local InfoMessage = require("ui/widget/infomessage")
+local ButtonDialogTitle = require("ui/widget/buttondialogtitle")
 local UIManager = require("ui/uimanager")
 
 local controller = require("bluetooth/controller/controller")
@@ -61,7 +61,7 @@ end
 
 function BluetoothMenu:addToMainMenu(menu_items)
     menu_items.bluetooth = {
-        text = "Bluetooth",
+        text = _("Bluetooth"),
         sorting_hint = "tools",
         sub_item_table_func = function(touchmenu_instance)
             self.touchmenu_instance = touchmenu_instance
@@ -74,7 +74,7 @@ function BluetoothMenu:getTopMenu()
     local menu = {
         {
             text = _("Bluetooth"),
-            callback = function()
+            callback = function(touchmenu_instance)
                 self.controller:toggle()
                 if touchmenu_instance then
                     touchmenu_instance:updateItems()
@@ -112,9 +112,10 @@ end
 function BluetoothMenu:pairedDevices(menu, knownDevices)
     if knownDevices ~= nil then
         -- Iterate over the known Devices objects
-        for _, dev in ipairs(knownDevices) do
+        for i, dev in ipairs(knownDevices) do
             -- Insert the menu item
-            table.insert(menu, {
+            if dev.paired == true then
+                table.insert(menu, {
                     text = dev.name,
                     callback = function(touchmenu_instance)
 
