@@ -40,7 +40,7 @@ end
 
 --- Build a Devices instance from a raw "mac, name" pair, as produced by
 --- scanning/listing known devices.
----@field controller any
+--@field controller any
 function Devices:fromScan(mac, name, backend, ctrl)
     return Devices:new({ mac = mac, name = name, backend = backend, controller = ctrl })
 end
@@ -138,6 +138,9 @@ function Devices:toggleConnection(callback)
     end
 end
 
+--- Pairs with the device, then connects, then trusts it — each step only
+--- proceeding if the previous one was confirmed. `callback` is invoked
+--- exactly once, at the end of the chain (or as soon as a step fails).
 function Devices:pair(callback)
     if not self.backend then
         logger.warn("Devices:pair called with no backend set on device " .. tostring(self.mac))
@@ -145,12 +148,18 @@ function Devices:pair(callback)
         return
     end
     self.backend:pair(self.mac)
-    pollField(self, "paired", true, function(confirmed)
-        if confirmed then
-            self:connect(callback)
-        elseif callback then
-            callback(false)
+    pollField(self, "paired", true, function(paired_confirmed)
+        if not paired_confirmed then
+            if callback then callback(false) end
+            return
         end
+        self:connect(function(connected_confirmed)
+            if not connected_confirmed then
+                if callback then callback(false) end
+                return
+            end
+            self:trust(callback)
+        end)
     end)
 end
 
