@@ -51,11 +51,11 @@ local function execOk(cmd)
 end
 
 function bluez:isOn()
-    return execOk('bluetoothctl show  | grep -o "Powered: yes"')
+    return execOk('bluetoothctl show | grep -o "Powered: yes"')
 end
 
 function bluez:isOff()
-    return execOk('bluetoothctl show  | grep -o "Powered: no"')
+    return execOk('bluetoothctl show | grep -o "Powered: no"')
 end
 
 function bluez:status()
