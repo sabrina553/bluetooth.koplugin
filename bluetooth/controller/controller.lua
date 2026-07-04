@@ -142,27 +142,30 @@ end
 -- are kept for callers that only have a mac string, and simply look up or
 -- construct the Devices object first.
 
----@param dev Devices|string A Devices instance, or a mac address string
-function controller:connect(dev)
+---@param dev Devices|string
+---@param callback fun(confirmed: boolean)|nil
+function controller:connect(dev, callback)
     self:enableWhenDisabled()
     if type(dev) == "string" then
         dev = self:getDevice(dev)
     end
     if not dev then
         logger.warn("controller:connect called with unknown device")
+        if callback then callback(false) end
         return
     end
-    return dev:connect()
+    dev:connect(callback)
 end
 
 ---@param dev Devices|string
-function controller:disconnect(dev)
-    self:enableWhenDisabled()
+---@param callback fun(confirmed: boolean)|nil
+function controller:disconnect(dev, callback)
     if type(dev) == "string" then
         dev = self:getDevice(dev)
     end
     if not dev then
         logger.warn("controller:disconnect called with unknown device")
+        if callback then callback(false) end
         return
     end
     return dev:disconnect()
