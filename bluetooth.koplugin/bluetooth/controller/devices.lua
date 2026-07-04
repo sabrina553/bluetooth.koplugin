@@ -228,5 +228,4 @@ function Devices:toggleBlock(callback)
     end
 end
 
-
 return Devices
