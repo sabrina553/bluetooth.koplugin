@@ -1,4 +1,5 @@
 local logger = require("logger")
+local UIManager = require("ui/uimanager")
 
 ---@class Devices
 ---@field mac string
@@ -34,6 +35,7 @@ function Devices:init()
     self.blocked = self.blocked or false
     self.connected = self.connected or false
     self.backend = self.backend
+    logger:dbg("Bluetooth.koplugin.Devices Initialized")
 end
 
 --- Build a Devices instance from a raw "mac, name" pair, as produced by
