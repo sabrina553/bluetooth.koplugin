@@ -82,26 +82,28 @@ function bluez:pair(mac)
     if not self:isOn() then
         self:enable()
     end
-    os.execute('bluetoothctl -t 4 pair ' .. mac .. ' &')
     logger.info("Pairing with Bluetooth device: " .. mac)
+    os.execute('bluetoothctl pair ' .. mac .. ' &')
 end
 
 function bluez:unpair(mac)
-    os.execute('bluetoothctl -t 4 remove ' .. mac .. ' &')
+    -- doesn't know if it is paired?
     logger.info("Unpairing with Bluetooth device: " .. mac)
+    os.execute('bluetoothctl remove ' .. mac .. ' &')
 end
 
 function bluez:connect(mac)
     if not self:isOn() then
         self:enable()
     end
-    os.execute('bluetoothctl -t 4 connect ' .. mac .. ' &')
+
     logger.info("Connecting to Bluetooth device: " .. mac)
+    os.execute('bluetoothctl connect ' .. mac .. ' &') -- launch, don't wait
 end
 
 function bluez:disconnect(mac)
-    os.execute('bluetoothctl -t 4 disconnect ' .. mac .. ' &')
     logger.info("Disconnecting from Bluetooth device: " .. mac)
+    os.execute('bluetoothctl disconnect ' .. mac .. ' &')
 end
 
 
