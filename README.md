@@ -40,7 +40,6 @@ Main-Menu:
 
 - Enable Bluetooth (controller)
 - Search Devices 
---- 
 - Your Paired Deivces. Click to toggle Connection:Hold to show device specific actions and details. 
 
 ## License
