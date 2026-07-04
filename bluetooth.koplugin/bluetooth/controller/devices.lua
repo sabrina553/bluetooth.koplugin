@@ -145,7 +145,13 @@ function Devices:pair(callback)
         return
     end
     self.backend:pair(self.mac)
-    pollField(self, "paired", true, callback)
+    pollField(self, "paired", true, function(confirmed)
+        if confirmed then
+            self:connect(callback)
+        elseif callback then
+            callback(false)
+        end
+    end)
 end
 
 function Devices:unpair(callback)
