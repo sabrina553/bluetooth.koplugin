@@ -81,7 +81,62 @@ function Devices:refresh()
     return self
 end
 
-function Devices:pair()
+--- Polls `refresh()` on a timer until self.connected == expected, or gives up.
+---@param expected boolean
+---@param callback fun(confirmed: boolean)|nil called once, with true if state was confirmed
+---@param attempt integer|nil internal, do not pass
+local function pollField(self, field, expected, callback, attempt)
+    attempt = attempt or 1
+    local max_attempts = 10
+    local delay_s = 0.5
+
+    self:refresh()
+
+    if self[field] == expected then
+        if callback then callback(true) end
+        return
+    end
+
+    if attempt >= max_attempts then
+        logger.warn("Devices: could not confirm connection state for " .. tostring(self.mac))
+        if callback then callback(false) end
+        return
+    end
+
+    UIManager:scheduleIn(delay_s, function()
+        pollField(self, field, expected, callback, attempt + 1)
+    end)
+end
+
+function Devices:connect(callback)
+    if not self.backend then
+        logger.warn("Devices:connect called with no backend set on device " .. tostring(self.mac))
+        if callback then callback(false) end
+        return
+    end
+    self.backend:connect(self.mac)
+    pollField(self, "connected", true, callback)
+end
+
+function Devices:disconnect(callback)
+    if not self.backend then
+        logger.warn("Devices:disconnect called with no backend set on device " .. tostring(self.mac))
+        if callback then callback(false) end
+        return
+    end
+    self.backend:disconnect(self.mac)
+    pollField(self, "connected", false, callback)
+end
+
+function Devices:toggleConnection(callback)
+    if self.connected then
+        return self:disconnect(callback)
+    else
+        return self:connect(callback)
+    end
+end
+
+function Devices:pair(callback)
     if not self.backend then
         logger.warn("Devices:pair called with no backend set on device " .. tostring(self.mac))
         return
