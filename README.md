@@ -2,7 +2,9 @@
 
 *The* Bluetooth plugin for ko-reader.
 
-WARNING: This is in development and as of right now is not functional. Is only compatabile with Unix based devices, and it frankly utterly useless.
+WARNING: This is in development! Currently limited to pocketbook and is subject to contain issues and bugs. Please use this repository page to report issues and feature requests; however significant! and I hope to get round to fixing/implementing them.
+
+Plugins like this are built for it's users and on the backs of their contributions. 
 
 # Aims
 
@@ -12,8 +14,8 @@ Current state is working with Unix devices running bluez, (Linux/PocketBook).
 
 Tested and Verified against:
 
-- u634.6.10.3425 (PocketBook Verse Pro)
-- Fedora 7.0.13 (Desktop) running under the kodev simulator.
+- PocketBook: Verse Pro (u634.6.10.3425)
+- Linux: Fedora 7.0.13 (running under the kodev simulator)
 
 As of now I expect this *should* work for all PocketBook devices that are based on linux. Aswell as any other linux devices.
 
@@ -26,24 +28,20 @@ Thank you to [last-available-username](https://github.com/last-available-usernam
 
 Download the zip, extract.
 
-Place contents in the koreader/plugins directory:
+Place the internal bluetooth.koplugin directory into the koreader/plugins directory. (ignoring the Readme, license and such)
 
-```
-plugins/
-├── pocketbook-bluetooth.koplugin/
-|   |__ bluetooth/
-│   ├── _meta.lua
-│   └── main.lua
-├── some-other.koplugin/
-└── yet-another.koplugin/
-```
 Restart KOReader.
 
 ## Usage
 
 Appears in the top menu under Tools (Crossed Wrench and Screwdriver Icon) as "Pocketbook Bluetooth"
 
-Provides three actions "Enable Bluetooth", "Disable Bluetooth" and "Toggle Bluetooth".
+Main-Menu: 
+
+- Enable Bluetooth (controller)
+- Search Devices 
+--- 
+- Your Paired Deivces. Click to toggle Connection:Hold to show device specific actions and details. 
 
 ## License
 
