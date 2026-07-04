@@ -71,10 +71,11 @@ function BluetoothMenu:getTopMenu()
         {
             text = _("Bluetooth"),
             callback = function(touchmenu_instance)
-                self.controller:toggle()
+                self.controller:toggle(function(confirmed)
                 if touchmenu_instance then
                     touchmenu_instance:updateItems()
                 end
+            end)
             end,
             checked_func = function()
                 return self.controller.is_enabled
@@ -84,20 +85,25 @@ function BluetoothMenu:getTopMenu()
         {
             text = _("Search Bluetooth"),
             callback = function(touchmenu_instance)
-                self:showSearchResults(touchmenu_instance)
+                self:showSearchResults(function(confirmed)
+                if touchmenu_instance then
+                        touchmenu_instance:updateItems()
+                    end
+                end)
             end,
             keep_menu_open = true,
             separator = true,
         }
     }
-
-    self:pairedDevices(menu, self.controller.known_devices)
     self:refreshKnownDevicesAsync()
+    self:pairedDevices(menu, self.controller.known_devices)
+
     return menu
 end
 
 function BluetoothMenu:refreshKnownDevicesAsync()
     UIManager:scheduleIn(0, function()
+        self.controller:status()
         self.controller:knownDevices()
         if self.touchmenu_instance then
             self.touchmenu_instance:updateItems()
@@ -159,18 +165,18 @@ function BluetoothMenu:pairedDevices(menu, knownDevices)
     end
 end
 
-function BluetoothMenu:showSearchResults(touchmenu_instance)
+function BluetoothMenu:showSearchResults(on_refresh)
     local scan_duration = 15
     local poll_interval = 1
 
-    self.controller:search(scan_duration)
+    self.controller:search(on_refresh, scan_duration)
     self.search_menu_closed = false
 
     self.search_menu = Menu:new{
         title = _("Searching for devices…"),
         item_table = buildItemTable(self.controller.known_devices),
         onMenuSelect = function(_, item)
-            self:pairFoundDevice(item.dev, touchmenu_instance)
+            self:pairFoundDevice(item.dev, on_refresh)
         end,
         close_callback = function()
             self.search_menu_closed = true
@@ -198,7 +204,7 @@ function BluetoothMenu:showSearchResults(touchmenu_instance)
     UIManager:scheduleIn(poll_interval, poll)
 end
 
-function BluetoothMenu:pairFoundDevice(dev, touchmenu_instance)
+function BluetoothMenu:pairFoundDevice(dev, on_refresh)
     if dev.paired then
         return -- already paired, nothing to do from here
     end
@@ -229,8 +235,8 @@ function BluetoothMenu:pairFoundDevice(dev, touchmenu_instance)
                 timeout = 2,
             })
         end
-        if touchmenu_instance then
-            touchmenu_instance:updateItems()
+        if on_refresh then
+            on_refresh(confirmed)
         end
     end)
 end
@@ -264,7 +270,7 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
                     text = dev.paired and _("Unpair") or _("Pair"),
                     callback = function()
                         UIManager:close(dialog)
-                        dev:togglePairing(dev, function(confirmed)
+                        dev:togglePair(function(confirmed)
                             if not confirmed then
                                 UIManager:show(InfoMessage:new{
                                     text = _("Could not confirm pairing change for ") .. dev.name,
@@ -282,7 +288,7 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
                     text = dev.trusted and _("Untrust") or _("Trust"),
                     callback = function()
                         UIManager:close(dialog)
-                        dev:toggleTrust(dev, function(confirmed)
+                        dev:toggleTrust(function(confirmed)
                             if not confirmed then
                                 UIManager:show(InfoMessage:new{
                                     text = _("Could not confirm trust change for ") .. dev.name,
@@ -299,7 +305,7 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
                     text = dev.blocked and _("Unblock") or _("Block"),
                     callback = function()
                         UIManager:close(dialog)
-                        dev:toggleBlock(dev, function(confirmed)
+                        dev:toggleBlock(function(confirmed)
                             if not confirmed then
                                 UIManager:show(InfoMessage:new{
                                     text = _("Could not confirm block change for ") .. dev.name,
@@ -320,7 +326,7 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
                     text = dev.connected and _("Disonnect") or _("Connect"),
                     callback = function()
                         UIManager:close(dialog)
-                        dev:toggleConnection(dev, function(confirmed)
+                        dev:toggleConnection(function(confirmed)
                             if not confirmed then
                                 UIManager:show(InfoMessage:new{
                                     text = _("Could not confirm connection change for ") .. dev.name,
