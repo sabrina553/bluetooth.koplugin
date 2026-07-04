@@ -139,10 +139,11 @@ end
 function Devices:pair(callback)
     if not self.backend then
         logger.warn("Devices:pair called with no backend set on device " .. tostring(self.mac))
+        if callback then callback(false) end
         return
     end
     self.backend:pair(self.mac)
-    self.paired = true
+    pollField(self, "paired", true, callback)
 end
 
 function Devices:unpair()
