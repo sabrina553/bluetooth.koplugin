@@ -146,14 +146,22 @@ function Devices:pair(callback)
     pollField(self, "paired", true, callback)
 end
 
-function Devices:unpair()
+function Devices:unpair(callback)
     if not self.backend then
         logger.warn("Devices:unpair called with no backend set on device " .. tostring(self.mac))
+        if callback then callback(false) end
         return
     end
     self.backend:unpair(self.mac)
-    self.paired = false
-    self.connected = false
+    pollField(self, "paired", false, callback)
+end
+
+function Devices:togglePair(callback)
+    if self.paired then
+        return self:unpair(callback)
+    else
+        return self:pair(callback)
+    end
 end
 
 function Devices:connect()
