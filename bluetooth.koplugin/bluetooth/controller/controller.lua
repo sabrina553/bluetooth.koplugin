@@ -28,7 +28,9 @@ end
 
 -- Maps a device type name to the backend *instance* that implements it.
 -- Using instances (rather than re-deriving the type each call) means we
--- only construct PocketBook/Bluez once and reuse them.
+-- only construct PocketBook/Bluez once and reuse them across the app.
+-- NOTE: these are shared singletons, so we (re)assign `.controller` on
+-- whichever one gets selected in init(), rather than passing it in here.
 local backends = {
     PocketBook = PocketBook:new(),
     Bluez = Bluez:new(),
@@ -37,19 +39,16 @@ local backends = {
 function controller:init()
     self:Devicetype()
 
-    if not backends then
-        backends = {
-            PocketBook = PocketBook:new(self),
-            Bluez = Bluez:new(self),
-        }
-    end
     self.backend = backends[self.type]
+    if self.backend then
+        -- Give the backend a way to call back into this controller (and,
+        -- via the backend, so can any Devices instance it constructs).
+        self.backend.controller = self
+    end
 
     self:status()
     self:knownDevices()
-    -- self.is_scanning = false
-    -- self.is_connected = false
-    -- self.is_disconnected = false
+
     logger:dbg("Bluetooth.koplugin.Controller Initialized")
 end
 
@@ -79,9 +78,11 @@ end
 ---@param mac string
 ---@return Devices|nil
 function controller:getDevice(mac)
+    logger.dbg("Looking up known device by MAC: " .. mac)
     if not self.known_devices then
         return nil
     end
+
     for _, dev in ipairs(self.known_devices) do
         if dev.mac == mac then
             return dev
@@ -95,6 +96,8 @@ end
 ---@param callback fun(confirmed: boolean)|nil 
 ---@param attempt integer|nil internal, do not pass
 local function pollField(self, field, expected, callback, attempt)
+    logger.dbg ("Polling field: " .. field .. " for value: " .. tostring(expected))
+
     attempt = attempt or 1
     local max_attempts = 10
     local delay_s = 0.5
@@ -118,16 +121,18 @@ end
 
 
 function controller:status()
-    logger.info("Checking Bluetooth status")
+    logger.dbg("Checking Bluetooth status")
     self.is_enabled = self:callDeviceFunction("status")
 end
 
 function controller:enable(callback)
+    logger.dbg("Enabling Bluetooth Controller")
     self:callDeviceFunction("enable")
     pollField(self, "is_enabled", true, callback)
 end
 
 function controller:disable(callback)
+    logger.dbg("Disabling Bluetooth Controller")
     self:callDeviceFunction("disable")
     pollField(self, "is_enabled", false, callback)
 end
@@ -145,37 +150,55 @@ function controller:enableWhenDisabled(callback)
     self:status()
     if not self.is_enabled then
         self:enable(callback)
-    else
+    elseif callback then
         callback(true)
     end
 end
 
---- Refreshes and returns the list of known Devices instances. @return Devices[]
----
 function controller:knownDevices(callback)
-    logger.info("Refreshing known devices")
+    logger.dbg("Refreshing known devices")
 
-    if self.backend == backends.PocketBook then -- and something so this only runs on init?
-        self:enableWhenDisabled(callback)
+    local function refresh()
+        self.known_devices = self:callDeviceFunction("knownDevices") or {}
+
+        for _, dev in ipairs(self.known_devices) do
+            dev:refresh()
+        end
+
+        if callback then callback(true) end
+        return self.known_devices
     end
 
-    self.known_devices = self:callDeviceFunction("knownDevices") or {}
-    logger.info(#self.known_devices)
-    for _, dev in ipairs(self.known_devices) do
-        dev:refresh()
+    if self.backend == backends.PocketBook then
+        self:enableWhenDisabled(function(enabled_confirmed) -- this might need adjusting, such that it only enables on init, and not each time the function is called.
+            if not enabled_confirmed then
+                if callback then callback(false) end
+                return
+            end
+            refresh()
+        end)
+
+        return self.known_devices
     end
-    return self.known_devices
+
+    return refresh()
 end
 
---- Scans for devices and merges any newly-found ones into knownDevices. @return Devices[]
----
 function controller:search(callback, duration)
-    self:enableWhenDisabled(callback)
-    self:callDeviceFunction("search", duration)
+    logger.dbg("Starting Bluetooth scan for " .. tostring(duration) .. " seconds")
+    self:enableWhenDisabled(function(enabled_confirmed)
+        if not enabled_confirmed then
+            if callback then callback(false) end
+            return
+        end
+        self:callDeviceFunction("search", duration)
+        if callback then callback(true) end
+    end)
 end
 
 ---@param mac string
 function controller:info(mac)
+    logger.dbg("Fetching info for device with MAC: " .. tostring(mac))
     return self:callDeviceFunction("info", mac)
 end
 
