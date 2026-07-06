@@ -22,47 +22,28 @@ function pocketbook:new(ctrl)
     return setmetatable({ controller = ctrl }, self)
 end
 
-local function execOk(cmd)
-    local ok, exit_type, code = os.execute(cmd)
-    if type(ok) == "number" then
-        return ok == 0          -- Lua 5.1
-    end
-    return ok == true or code == 0  -- Lua 5.2+
-end
-
-function pocketbook:isOn()
-    logger.info("Checking Bluetooth status isOn..")
-    return execOk('netagent bt status | grep BT_STATE_ON')
-end
-
-function pocketbook:isOff()
-    logger.info("Checking Bluetooth status isOff..")
-    return execOk('netagent bt status | grep BT_STATE_OFF')
-end
-
-function pocketbook:isReady()
-    logger.info("Checking Bluetooth status isReady..")
-    return execOk('netagent bt status | grep BT_STATE_READY')
-end
-
 function pocketbook:status()
-    if self:isOff() then
+    logger.info("Checking Bluetooth status..")
+    local handle = io.popen('netagent bt status')
+    local output = handle:read("*a")
+    handle:close()
+
+    if output:find("BT_STATE_OFF") then
         logger.info("Bluetooth is OFF")
         return false
-    else
-        logger.info("Bluetooth is ON")
-        return true
     end
+    logger.info("Bluetooth is ON")
+    return true
 end
 
 function pocketbook:enable()
     logger.info("Enabling Bluetooth...")
-    os.execute('netagent bt on')
+    os.execute('netagent bt on &')
 end
 
 function pocketbook:disable()
     logger.info("Disabling Bluetooth...")
-    os.execute('netagent bt off')
+    os.execute('netagent bt off &')
 end
 
 function pocketbook:pair(mac)
@@ -98,6 +79,7 @@ function pocketbook:unblock(mac)
 end
 
 function pocketbook:knownDevices()
+    Bluez.controller = self.controller
     return Bluez:knownDevices()
 end
 
