@@ -5,7 +5,6 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local BluetoothMenu = require("bluetooth/ui/menu")
 local controller = require("bluetooth/controller/controller")
 
-
 ---@class Bluetooth
 ---@field ui any This is a ReaderUI
 ---@field controller any
@@ -19,10 +18,10 @@ local Bluetooth = WidgetContainer:extend {
 }
 
 function Bluetooth:init()
-    --self.devices = devices:new({})
     self.controller = controller:new({
         devices = self.devices
     })
+
     self.menu = BluetoothMenu:new({
         ui = self.ui,
         controller = self.controller,
