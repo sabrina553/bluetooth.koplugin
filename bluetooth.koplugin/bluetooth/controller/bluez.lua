@@ -42,61 +42,46 @@ function bluez:new(ctrl)
     return setmetatable({ controller = ctrl }, self)
 end
 
-local function execOk(cmd)
-    local ok, exit_type, code = os.execute(cmd)
-    if type(ok) == "number" then
-        return ok == 0          -- Lua 5.1
-    end
-    return ok == true or code == 0  -- Lua 5.2+
-end
-
-function bluez:isOn()
-    return execOk('bluetoothctl show | grep -o "Powered: yes"')
-end
-
-function bluez:isOff()
-    return execOk('bluetoothctl show | grep -o "Powered: no"')
-end
-
 function bluez:status()
-    if self:isOn() then
+    local handle = io.popen('bluetoothctl show')
+    local output = handle:read("*a")
+    handle:close()
+
+    if output:find("Powered: yes") then
         logger.info("Bluetooth is enabled")
         return true
-    elseif self:isOff() then
+    elseif output:find("Powered: no") then
         logger.info("Bluetooth is disabled")
         return false
     end
+    logger.warn("Bluetooth: could not determine power state")
+    return false
 end
 
 function bluez:enable()
     logger.info("Enabling Bluetooth...")
-    os.execute('bluetoothctl power on')
+    os.execute('bluetoothctl power on &')
 end
 
 function bluez:disable()
     logger.info("Disabling Bluetooth...")
-    os.execute('bluetoothctl power off')
+    os.execute('bluetoothctl power off &')
 end
 
 function bluez:pair(mac)
-    if not self:isOn() then
-        self:enable()
-    end
     logger.info("Pairing with Bluetooth device: " .. mac)
-    os.execute('bluetoothctl pair ' .. mac .. ' &')
+    os.execute(string.format(
+        'echo -e "agent NoInputNoOutput\\ndefault-agent\\npair %s\\nquit\\n" | bluetoothctl &', -- maybe worth repeating this for other commands
+        mac
+    ))
 end
 
 function bluez:unpair(mac)
-    -- doesn't know if it is paired?
     logger.info("Unpairing with Bluetooth device: " .. mac)
     os.execute('bluetoothctl remove ' .. mac .. ' &')
 end
 
 function bluez:connect(mac)
-    if not self:isOn() then
-        self:enable()
-    end
-
     logger.info("Connecting to Bluetooth device: " .. mac)
     os.execute('bluetoothctl connect ' .. mac .. ' &') -- launch, don't wait
 end
@@ -126,9 +111,6 @@ function bluez:unblock(mac)
     os.execute('bluetoothctl unblock ' .. mac .. ' &')
 end
 
---- Parses one line of `bluetoothctl devices`/scan-style output of the form
---- "Device AA:BB:CC:DD:EE:FF Some Name" (with an optional [NEW] prefix
---- handled by the caller). Returns mac, name or nil if the line doesn't match.
 local function parseDeviceLine(line)
     local mac, rest = string.match(line, "Device (%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)%s+(.*)")
     if not mac then
@@ -149,7 +131,7 @@ function bluez:knownDevices()
     for line in string.gmatch(output, "[^\r\n]+") do
         local mac, name = parseDeviceLine(line)
         if mac then
-            table.insert(devices, Devices:fromScan(mac, name, self))
+            table.insert(devices, Devices:fromScan(mac, name, self, self.controller))
         end
     end
     logger.info("Found " .. #devices .. " known devices")
