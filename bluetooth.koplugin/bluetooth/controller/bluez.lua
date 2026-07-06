@@ -48,28 +48,28 @@ function bluez:status()
     handle:close()
 
     if output:find("Powered: yes") then
-        logger.info("Bluetooth is enabled")
+        logger.dbg("Bluez: Bluetooth is enabled")
         return true
     elseif output:find("Powered: no") then
-        logger.info("Bluetooth is disabled")
+        logger.dbg("Bluez: Bluetooth is disabled")
         return false
     end
-    logger.warn("Bluetooth: could not determine power state")
+    logger.warn("Bluez: could not determine power state")
     return false
 end
 
 function bluez:enable()
-    logger.info("Enabling Bluetooth...")
+    logger.dbg("Bluez: Enabling Bluetooth...")
     os.execute('bluetoothctl power on &')
 end
 
 function bluez:disable()
-    logger.info("Disabling Bluetooth...")
+    logger.dbg("Bluez: Disabling Bluetooth...")
     os.execute('bluetoothctl power off &')
 end
 
 function bluez:pair(mac)
-    logger.info("Pairing with Bluetooth device: " .. mac)
+    logger.dbg("Bluez: Pairing with Bluetooth device: " .. mac)
     os.execute(string.format(
         'echo -e "agent NoInputNoOutput\\ndefault-agent\\npair %s\\nquit\\n" | bluetoothctl &', -- maybe worth repeating this for other commands
         mac
@@ -77,37 +77,37 @@ function bluez:pair(mac)
 end
 
 function bluez:unpair(mac)
-    logger.info("Unpairing with Bluetooth device: " .. mac)
+    logger.dbg("Bluez: Unpairing with Bluetooth device: " .. mac)
     os.execute('bluetoothctl remove ' .. mac .. ' &')
 end
 
 function bluez:connect(mac)
-    logger.info("Connecting to Bluetooth device: " .. mac)
+    logger.dbg("Bluez: Connecting to Bluetooth device: " .. mac)
     os.execute('bluetoothctl connect ' .. mac .. ' &') -- launch, don't wait
 end
 
 function bluez:disconnect(mac)
-    logger.info("Disconnecting from Bluetooth device: " .. mac)
+    logger.dbg("Bluez: Disconnecting from Bluetooth device: " .. mac)
     os.execute('bluetoothctl disconnect ' .. mac .. ' &')
 end
 
 function bluez:trust(mac)
-    logger.info("Trusting Bluetooth device: " .. mac)
+    logger.dbg("Bluez: Trusting Bluetooth device: " .. mac)
     os.execute('bluetoothctl trust ' .. mac .. ' &')
 end
 
 function bluez:untrust(mac)
-    logger.info("Untrusting Bluetooth device: " .. mac)
+    logger.dbg("Bluez: Untrusting Bluetooth device: " .. mac)
     os.execute('bluetoothctl untrust ' .. mac .. ' &')
 end
 
 function bluez:block(mac)
-    logger.info("Blocking Bluetooth device: " .. mac)
+    logger.dbg("Bluez: Blocking Bluetooth device: " .. mac)
     os.execute('bluetoothctl block ' .. mac .. ' &')
 end
 
 function bluez:unblock(mac)
-    logger.info("Unblocking Bluetooth device: " .. mac)
+    logger.dbg("Bluez: Unblocking Bluetooth device: " .. mac)
     os.execute('bluetoothctl unblock ' .. mac .. ' &')
 end
 
@@ -134,13 +134,13 @@ function bluez:knownDevices()
             table.insert(devices, Devices:fromScan(mac, name, self, self.controller))
         end
     end
-    logger.info("Found " .. #devices .. " known devices")
+    logger.dbg("Bluez: Found " .. #devices .. " known devices")
     return devices
 end
 
 function bluez:search(duration)
     duration = duration or 15
-    logger.info("Starting background Bluetooth scan for " .. duration .. "s")
+    logger.dbg("Bluez: Starting background Bluetooth scan for " .. duration .. "s")
     os.execute(string.format('bluetoothctl --timeout %d scan on &', duration))
 end
 
