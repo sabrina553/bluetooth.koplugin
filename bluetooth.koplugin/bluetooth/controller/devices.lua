@@ -38,14 +38,11 @@ function Devices:init()
     logger:dbg("Bluetooth.koplugin.Devices Initialized")
 end
 
---- Build a Devices instance from a raw "mac, name" pair, as produced by
---- scanning/listing known devices.
 --@field controller any
 function Devices:fromScan(mac, name, backend, ctrl)
     return Devices:new({ mac = mac, name = name, backend = backend, controller = ctrl })
 end
 
---- Populate fields from `bluetoothctl info <mac>` style output.
 function Devices:parseInfo(output)
     self.mac = output:match("Device (%w+:%w+:%w+:%w+:%w+:%w+)") or self.mac
 
@@ -68,7 +65,6 @@ function Devices:parseInfo(output)
     return self
 end
 
---- Refresh this device's status fields by asking the backend for `info`.
 function Devices:refresh()
     if not self.backend or not self.backend.info then
         logger.warn("Devices:refresh called with no backend set on device " .. tostring(self.mac))
@@ -83,7 +79,7 @@ function Devices:refresh()
     return self
 end
 
---- Polls `refresh()` on a timer until self.connected == expected, or gives up.
+--- Polls `refresh()` on a timer until self.field == expected, or gives up.
 ---@param expected boolean
 ---@param callback fun(confirmed: boolean)|nil called once, with true if state was confirmed
 ---@param attempt integer|nil internal, do not pass
@@ -116,8 +112,22 @@ function Devices:connect(callback)
         if callback then callback(false) end
         return
     end
-    self.backend:connect(self.mac)
-    pollField(self, "connected", true, callback)
+
+    if not self.controller then
+        logger.warn("Devices:connect called with no controller set on device " .. tostring(self.mac))
+        if callback then callback(false) end
+        return
+    end
+
+    self.controller:enableWhenDisabled(function(enabled_confirmed)
+        if not enabled_confirmed then
+            if callback then callback(false) end
+            return
+        end
+
+        self.backend:connect(self.mac)
+        pollField(self, "connected", true, callback)
+    end)
 end
 
 function Devices:disconnect(callback)
@@ -126,6 +136,11 @@ function Devices:disconnect(callback)
         if callback then callback(false) end
         return
     end
+    if not self.connected then
+        if callback then callback(true) end
+        return
+    end
+
     self.backend:disconnect(self.mac)
     pollField(self, "connected", false, callback)
 end
@@ -138,27 +153,40 @@ function Devices:toggleConnection(callback)
     end
 end
 
---- Pairs with the device, then connects, then trusts it — each step only
---- proceeding if the previous one was confirmed. `callback` is invoked
---- exactly once, at the end of the chain (or as soon as a step fails).
 function Devices:pair(callback)
     if not self.backend then
         logger.warn("Devices:pair called with no backend set on device " .. tostring(self.mac))
         if callback then callback(false) end
         return
     end
-    self.backend:pair(self.mac)
-    pollField(self, "paired", true, function(paired_confirmed)
-        if not paired_confirmed then
+    if self.paired then
+        if callback then callback(false) end
+        return
+    end
+    if not self.controller then
+        logger.warn("Devices:pair called with no controller set on device " .. tostring(self.mac))
+        if callback then callback(false) end
+        return
+    end
+
+    self.controller:enableWhenDisabled(function(enabled_confirmed)
+        if not enabled_confirmed then
             if callback then callback(false) end
             return
         end
-        self:connect(function(connected_confirmed)
-            if not connected_confirmed then
+        self.backend:pair(self.mac)
+        pollField(self, "paired", true, function(paired_confirmed)
+            if not paired_confirmed then
                 if callback then callback(false) end
                 return
             end
-            self:trust(callback)
+            self:connect(function(connected_confirmed)
+                if not connected_confirmed then
+                    if callback then callback(false) end
+                    return
+                end
+                self:trust(callback)
+            end)
         end)
     end)
 end
@@ -169,6 +197,12 @@ function Devices:unpair(callback)
         if callback then callback(false) end
         return
     end
+
+    if not self.paired then
+        if callback then callback(false) end
+        return
+    end
+
     self.backend:unpair(self.mac)
     pollField(self, "paired", false, callback)
 end
@@ -187,6 +221,11 @@ function Devices:trust(callback)
         if callback then callback(false) end
         return
     end
+    if self.trusted then
+        if callback then callback(true) end
+        return
+    end
+
     self.backend:trust(self.mac)
     pollField(self, "trusted", true, callback)
 end
@@ -197,6 +236,12 @@ function Devices:untrust(callback)
         if callback then callback(false) end
         return
     end
+
+    if not self.trusted then
+        if callback then callback(false) end
+        return
+    end
+
     self.backend:untrust(self.mac)
     pollField(self, "trusted", false, callback)
 end
@@ -215,6 +260,11 @@ function Devices:block(callback)
         if callback then callback(false) end
         return
     end
+    if self.blocked then
+        if callback then callback(true) end
+        return
+    end
+
     self.backend:block(self.mac)
     pollField(self, "blocked", true, callback)
 end
@@ -225,6 +275,11 @@ function Devices:unblock(callback)
         if callback then callback(false) end
         return
     end
+    if not self.blocked then
+        if callback then callback(false) end
+        return
+    end
+
     self.backend:unblock(self.mac)
     pollField(self, "blocked", false, callback)
 end
