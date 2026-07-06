@@ -23,26 +23,26 @@ function pocketbook:new(ctrl)
 end
 
 function pocketbook:status()
-    logger.info("Checking Bluetooth status..")
+    logger.dbg("Pocketbook-Netagent: Checking Bluetooth status..")
     local handle = io.popen('netagent bt status')
     local output = handle:read("*a")
     handle:close()
 
     if output:find("BT_STATE_OFF") then
-        logger.info("Bluetooth is OFF")
+        logger.dbg("Pocketbook-Netagent: Bluetooth is OFF")
         return false
     end
-    logger.info("Bluetooth is ON")
+    logger.dbg("Pocketbook-Netagent: Bluetooth is ON")
     return true
 end
 
 function pocketbook:enable()
-    logger.info("Enabling Bluetooth...")
+    logger.dbg("Pocketbook-Netagent: Enabling Bluetooth...")
     os.execute('netagent bt on &')
 end
 
 function pocketbook:disable()
-    logger.info("Disabling Bluetooth...")
+    logger.dbg("Pocketbook-Netagent: Disabling Bluetooth...")
     os.execute('netagent bt off &')
 end
 
