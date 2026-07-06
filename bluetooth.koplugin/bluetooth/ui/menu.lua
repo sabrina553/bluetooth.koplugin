@@ -83,6 +83,7 @@ end
 
 --- Builds the full Bluetooth submenu item table from current state.
 function BluetoothMenu:buildMenuTable()
+    --self:refreshKnownDevicesAsync()
     local menu = {
         {
             text = _("Bluetooth"),
@@ -93,8 +94,8 @@ function BluetoothMenu:buildMenuTable()
                     -- power state, then rebuild the menu to show it.
                     self.controller:knownDevices()
                     self:refreshMenu(touchmenu_instance)
-            end)
-        end,
+                end)
+            end,
             checked_func = function()
                 return self.controller.is_enabled
             end,
@@ -122,11 +123,11 @@ function BluetoothMenu:getTopMenu()
 end
 
 function BluetoothMenu:refreshKnownDevicesAsync()
-    UIManager:scheduleIn(0, function()
-        self.controller:status()
-        self.controller:knownDevices()
-        self:refreshMenu()
-    end)
+    --UIManager:scheduleIn(0, function()
+    self.controller:status()
+    self.controller:knownDevices()
+    self:refreshMenu()
+    --end)
 end
 
 function BluetoothMenu:pairedDevices(menu, knownDevices)
