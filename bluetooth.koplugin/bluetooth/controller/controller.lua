@@ -180,7 +180,17 @@ end
 ---@param expected boolean 
 ---@param callback fun(confirmed: boolean)|nil 
 ---@param attempt integer|nil internal, do not pass
-local function pollField(self, field, expected, callback, attempt)
+---@param generation integer the poll generation this call belongs to, captured
+---  by enable()/disable() at the moment they started polling. If a newer
+---  enable()/disable() call has since bumped self._poll_generation, this
+---  loop has been superseded and should stop quietly rather than keep
+---  polling and firing its own (now-stale) callback alongside the new one.
+local function pollField(self, field, expected, callback, attempt, generation)
+    if generation ~= self._poll_generation then
+        logger.dbg("Bluetooth: pollField for " .. field .. " superseded by a newer enable/disable call, stopping")
+        return
+    end
+
     logger.dbg ("Polling field: " .. field .. " for value: " .. tostring(expected))
 
     attempt = attempt or 1
@@ -188,6 +198,13 @@ local function pollField(self, field, expected, callback, attempt)
     local delay_s = 0.5
 
     self:status()
+
+    -- self:status() can itself take a moment on some backends; re-check
+    -- here too in case a newer enable/disable call landed while it ran.
+    if generation ~= self._poll_generation then
+        logger.dbg("Bluetooth: pollField for " .. field .. " superseded by a newer enable/disable call, stopping")
+        return
+    end
 
     if self[field] == expected then
         if callback then callback(true) end
@@ -200,7 +217,7 @@ local function pollField(self, field, expected, callback, attempt)
         return
     end
     UIManager:scheduleIn(delay_s, function()
-        pollField(self, field, expected, callback, attempt + 1)
+        pollField(self, field, expected, callback, attempt + 1, generation)
     end)
 end
 
@@ -212,14 +229,24 @@ end
 
 function controller:enable(callback)
     logger.dbg("Enabling Bluetooth Controller")
+    -- Bumping the generation here - before callDeviceFunction/pollField even
+    -- start - immediately supersedes any disable()/enable() poll loop that
+    -- might still be running from an earlier, closely-spaced call (e.g.
+    -- suspend immediately followed by resume). Without this, both loops
+    -- would keep polling status() and firing os.execute('netagent bt
+    -- on/off') concurrently against the same underlying radio.
+    self._poll_generation = (self._poll_generation or 0) + 1
+    local my_generation = self._poll_generation
     self:callDeviceFunction("enable")
-    pollField(self, "is_enabled", true, callback)
+    pollField(self, "is_enabled", true, callback, nil, my_generation)
 end
 
 function controller:disable(callback)
     logger.dbg("Disabling Bluetooth Controller")
+    self._poll_generation = (self._poll_generation or 0) + 1
+    local my_generation = self._poll_generation
     self:callDeviceFunction("disable")
-    pollField(self, "is_enabled", false, callback)
+    pollField(self, "is_enabled", false, callback, nil, my_generation)
 end
 
 function controller:toggle(callback)
