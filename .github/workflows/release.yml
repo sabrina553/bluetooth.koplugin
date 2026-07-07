@@ -20,7 +20,7 @@ jobs:
         run: |
           set -ex
 
-          cp ./README.md ./LICENSE ./bluetooth.koplugin/*
+          cp -r ./README.md ./LICENSE ./bluetooth.koplugin/
 
           zip -r bluetooth.koplugin.zip ./bluetooth.koplugin/
 
