@@ -4,6 +4,7 @@ local Menu = require("ui/widget/menu")
 local InfoMessage = require("ui/widget/infomessage")
 local ButtonDialogTitle = require("ui/widget/buttondialogtitle")
 local UIManager = require("ui/uimanager")
+local Event = require("ui/event")
 
 local function displayName(dev)
     if dev.name and dev.name ~= "" then
@@ -46,6 +47,7 @@ end
 ---@field controller any
 ---@field devices any
 ---@field menu_instance any
+---@field settings BluetoothSettings
 local BluetoothMenu = {}
 
 function BluetoothMenu:new(o)
@@ -66,12 +68,6 @@ function BluetoothMenu:addToMainMenu(menu_items)
     }
 end
 
---- Rebuilds the full item table from current controller/device state and
---- pushes it into the given (or last-known) touchmenu_instance, then
---- redraws. Call this any time state changes instead of calling
---- touchmenu_instance:updateItems() directly, since updateItems() alone
---- only re-renders the *existing* item_table (stale checked_func closures,
---- no newly paired devices, etc.).
 function BluetoothMenu:refreshMenu(touchmenu_instance)
     touchmenu_instance = touchmenu_instance or self.touchmenu_instance
     if not touchmenu_instance then
@@ -89,9 +85,6 @@ function BluetoothMenu:buildMenuTable()
             text = _("Bluetooth"),
             callback = function(touchmenu_instance)
                 self.controller:toggle(function(confirmed)
-                    -- Re-query every known device's info so their
-                    -- connected/paired/etc fields reflect the new
-                    -- power state, then rebuild the menu to show it.
                     self.controller:knownDevices()
                     self:refreshMenu(touchmenu_instance)
                 end)
@@ -102,6 +95,10 @@ function BluetoothMenu:buildMenuTable()
             keep_menu_open = true,
         },
         {
+            text = _("Settings"),
+            sub_item_table = self:getSettingsMenu(),
+        },
+        {
             text = _("Search Bluetooth"),
             callback = function(touchmenu_instance)
                 self:showSearchResults(function(confirmed)
@@ -110,7 +107,7 @@ function BluetoothMenu:buildMenuTable()
             end,
             keep_menu_open = true,
             separator = true,
-        }
+        },
     }
 
     self:pairedDevices(menu, self.controller.known_devices)
@@ -180,6 +177,66 @@ function BluetoothMenu:pairedDevices(menu, knownDevices)
             end
         end
     end
+end
+
+function BluetoothMenu:getSettingsMenu()
+     return {
+        {
+            text = _("Enable on Wake"),
+            checked_func = function()
+                return self.settings:getEnableOnWake()
+            end,
+            callback = function()
+                self.settings:toggleEnableOnWake()
+                UIManager:broadcastEvent(Event:new("BluetoothSettingsChanged"))
+            end,
+            keep_menu_open = true,
+        },
+        {
+            text = _("Disable on lock"),
+            checked_func = function()
+                return self.settings:getDisableOnLock()
+            end,
+            callback = function()
+                self.settings:toggleDisableOnLock() -- toggles :? 
+                UIManager:broadcastEvent(Event:new("BluetoothSettingsChanged"))
+            end,
+            keep_menu_open = true,
+        },
+        {
+            text = _("Disable on Suspend"),
+            checked_func = function()
+                return self.settings:getDisableOnSuspend()
+            end,
+            callback = function()
+                self.settings:toggleDisableOnSuspend()
+                UIManager:broadcastEvent(Event:new("BluetoothSettingsChanged"))
+            end,
+            keep_menu_open = true,
+            separator = true,
+        },
+        {
+            text = _("Starred on Wake"),
+            checked_func = function()
+                return self.settings:getStarredOnWake()
+            end,
+            callback = function()
+                self.settings:toggleStarredOnWake()
+                UIManager:broadcastEvent(Event:new("BluetoothSettingsChanged"))
+            end,
+            keep_menu_open = true,
+        },
+        {
+            text = _("Last on Wake"),
+            checked_func = function()
+                return self.settings:getLastOnWake()
+            end,
+            callback = function()
+                self.settings:toggleLastOnWake()
+                UIManager:broadcastEvent(Event:new("BluetoothSettingsChanged"))
+            end,
+            keep_menu_open = true,
+        }}
 end
 
 function BluetoothMenu:showSearchResults(on_refresh)
