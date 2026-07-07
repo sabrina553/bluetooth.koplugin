@@ -1,10 +1,14 @@
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local Menu = require("ui/widget/menu")
 local InfoMessage = require("ui/widget/infomessage")
 local ButtonDialogTitle = require("ui/widget/buttondialogtitle")
 local UIManager = require("ui/uimanager")
 local Event = require("ui/event")
+local ButtonDialog = require("ui/widget/buttondialog")
+
+local PluginMetadata = require("bluetooth/plugin_metadata")
 
 local function displayName(dev)
     if dev.name and dev.name ~= "" then
@@ -47,6 +51,7 @@ end
 ---@field controller any
 ---@field devices any
 ---@field menu_instance any
+---@field updater BluetoothSelfUpdater
 ---@field settings BluetoothSettings
 local BluetoothMenu = {}
 
@@ -236,7 +241,13 @@ function BluetoothMenu:getSettingsMenu()
                 UIManager:broadcastEvent(Event:new("BluetoothSettingsChanged"))
             end,
             keep_menu_open = true,
-        }}
+            separator = true,
+        },
+        {
+            text = _("About"),
+            sub_item_table = self:getAboutMenu(),
+        },
+    }
 end
 
 function BluetoothMenu:showSearchResults(on_refresh)
@@ -417,6 +428,124 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
         },
     }
     UIManager:show(dialog)
+end
+
+function BluetoothMenu:getAboutMenu()
+    -- These won't change after the plugin starts up
+    local repository = PluginMetadata.getRepository()
+    local version = PluginMetadata.getVersion()
+
+    return {
+        {
+            text = repository,
+            keep_menu_open = true,
+        },
+        {
+            text = T(_("Version %1"), version),
+            keep_menu_open = true,
+            separator = true,
+        },
+        {
+            text_func = function()
+                if self.updater:isPendingRestart() then
+                    return _("Update Pending Restart")
+                end
+
+                if self.updater:isUpdateAvailable() then
+                    local latest_version = self.updater:getLatestReleaseVersion()
+                    return T(_("Update to %1"), latest_version)
+                end
+
+                return _("Check for Updates")
+            end,
+            callback = function()
+                if self.updater:isPendingRestart() then
+                    UIManager:askForRestart(_("Bluetooth plugin update will apply on next Restart."))
+                else
+                    self:showPluginUpdateCheck()
+                end
+            end,
+        },
+    }
+end
+
+function BluetoothMenu:showPluginUpdateCheck(skip_version_check)
+    if not skip_version_check then
+        -- Refresh the latest version on open.
+        local close_message = self:toast(_("Checking for Updates"), 0)
+        self.updater:fetchLatestVersion()
+        pcall(close_message)
+    end
+
+    local dialog
+    local latest_version = self.updater:getLatestReleaseVersion()
+    local is_update_available = self.updater:isUpdateAvailable()
+
+    local update_button_text = _("No update available")
+    local title = _("Bluetooth.koplugin is currently up-to-date.")
+
+    if is_update_available then
+        update_button_text = T(_("Update to %1"), latest_version)
+        title = _("Update available for Bluetooth.koplugin.")
+    end
+
+    dialog = ButtonDialog:new({
+        title = title,
+        buttons = {
+            {
+                {
+                    text = update_button_text,
+                    callback = function()
+                        if is_update_available then
+                            UIManager:close(dialog)
+
+                            self:showPluginUpdater()
+                        end
+                    end,
+                },
+                {
+                    text = _("Check for Updates"),
+                    callback = function()
+                        self.updater:fetchLatestVersion()
+                        UIManager:close(dialog)
+                        self:showPluginUpdateCheck(true)
+                    end,
+                },
+            },
+            {
+                {
+                    text = _("Close"),
+                    callback = function()
+                        UIManager:close(dialog)
+                    end,
+                },
+            },
+        },
+    })
+
+    UIManager:show(dialog)
+end
+
+function BluetoothMenu:toast(text, timeout)
+    if self.info_message then
+        UIManager:close(self.info_message)
+    end
+
+    if timeout == nil then
+        timeout = 2
+    elseif timeout <= 0 then
+        timeout = nil
+    end
+
+    local info_message = InfoMessage:new({
+        text = text,
+        timeout = timeout,
+    })
+
+    UIManager:show(info_message)
+    self.info_message = info_message
+
+    return function() UIManager:close(info_message) end
 end
 
 return BluetoothMenu
