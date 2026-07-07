@@ -17,7 +17,7 @@ jobs:
           ref: ${{ github.event.release.tag_name }}
 
       - name: Create zip
-        run: zip -r bluetooth.koplugin.zip ./bluetooth.koplugin/bluetooth.koplugin/
+        run: zip -r bluetooth.koplugin.zip ./bluetooth.koplugin/
 
       - name: Upload asset to the release
         uses: softprops/action-gh-release@v2
