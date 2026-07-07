@@ -9,6 +9,7 @@ local UIManager = require("ui/uimanager")
 ---@field trusted boolean
 ---@field blocked boolean
 ---@field connected boolean
+---@field starred boolean
 ---@field controller any
 ---@field backend any The platform backend (Bluez, PocketBook, ...) used to actually talk to hardware
 local Devices = {}
@@ -34,6 +35,7 @@ function Devices:init()
     self.trusted = self.trusted or false
     self.blocked = self.blocked or false
     self.connected = self.connected or false
+    self.starred = self.starred or false
     self.backend = self.backend
     logger:dbg("Bluetooth.koplugin.Devices Initialized")
 end
@@ -290,6 +292,27 @@ function Devices:toggleBlock(callback)
     else
         return self:block(callback)
     end
+end
+
+--- Stars/unstars this device. Starring is pure app-level state — bluetoothctl
+--- has no concept of it. Multiple devices may be starred at once: this only
+--- ever touches this device's own flag and asks the controller to persist;
+--- it never affects any other device's starred state.
+function Devices:setStarred(starred, callback)
+    if not self.controller then
+        logger.warn("Devices:setStarred called with no controller set on device " .. tostring(self.mac))
+        if callback then callback(false) end
+        return
+    end
+
+    self.starred = starred
+    self.controller:persistDeviceState()
+
+    if callback then callback(true) end
+end
+
+function Devices:toggleStar(callback)
+    return self:setStarred(not self.starred, callback)
 end
 
 return Devices
