@@ -6,6 +6,8 @@ local BluetoothMenu = require("bluetooth/ui/menu")
 local controller = require("bluetooth/controller/controller")
 local BluetoothSettings = require("bluetooth/settings")
 local BluetoothDeviceStore = require("bluetooth/devicestore")
+local GithubAPI = require("bluetooth/ota/github_api")
+local BluetoothSelfUpdater = require("bluetooth/ota/self_updater")
 
 
 ---@class Bluetooth
@@ -24,6 +26,11 @@ function Bluetooth:init()
     self.settings = BluetoothSettings:new()
     self.device_store = BluetoothDeviceStore:new()
 
+    self.updater = BluetoothSelfUpdater:new({
+        github_api = GithubAPI:new(),
+        settings = self.settings,
+    })
+
     self.controller = controller:new({
         devices = self.devices,
         settings = self.settings,
@@ -35,6 +42,7 @@ function Bluetooth:init()
         settings = self.settings,
         controller = self.controller,
         devices = self.devices,
+        updater = self.updater,
     })
 
     self.ui.menu:registerToMainMenu(self.menu)
