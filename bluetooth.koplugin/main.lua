@@ -5,6 +5,7 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local BluetoothMenu = require("bluetooth/ui/menu")
 local controller = require("bluetooth/controller/controller")
 local BluetoothSettings = require("bluetooth/settings")
+local BluetoothDeviceStore = require("bluetooth/devicestore")
 
 
 ---@class Bluetooth
@@ -21,10 +22,12 @@ local Bluetooth = WidgetContainer:extend {
 
 function Bluetooth:init()
     self.settings = BluetoothSettings:new()
+    self.device_store = BluetoothDeviceStore:new()
 
     self.controller = controller:new({
         devices = self.devices,
-        settings = self.settings
+        settings = self.settings,
+        device_store = self.device_store,
     })
 
     self.menu = BluetoothMenu:new({
@@ -36,27 +39,53 @@ function Bluetooth:init()
 
     self.ui.menu:registerToMainMenu(self.menu)
 
+    self:restoreBluetoothState()
+
     logger:dbg("Bluetooth.koplugin: Initialized")
 end
 
-function Bluetooth:onExit()
-    logger.dbg("Bluetooth.koplugin: Device exiting, disabling bluetooth")
-    self.controller:disable()
-end
+function Bluetooth:restoreBluetoothState()
+    local function afterEnabled(enabled_confirmed)
+        if not enabled_confirmed then
+            logger.warn("Bluetooth.koplugin: could not confirm bluetooth enabled, skipping reconnect")
+            return
+        end
+        self.controller:knownDevices(function()
+            self.controller:reconnectOnWake() -- Have this disconnect the controller on failures :) 
+        end)
+    end
 
-function Bluetooth:onSuspend()
-    logger.dbg("Bluetooth.koplugin: Device suspending, disabling bluetooth")
-    self.controller:disable()
-end
-
-function Bluetooth:onPause()
-    logger.dbg("Bluetooth.koplugin: Device pausing, disabling bluetooth")
-    self.controller:disable()
+    if self.settings:getEnableOnWake() then
+        self.controller:enableWhenDisabled(afterEnabled)
+    else
+        self.controller:status()
+        if self.controller.is_enabled then
+            afterEnabled(true)
+        end
+    end
 end
 
 function Bluetooth:onResume()
     logger.dbg("Bluetooth.koplugin: Device resumed, Restoring Bluetooth")
-    self.controller:enableWhenDisabled()
+    self:restoreBluetoothState()
+end
+
+function Bluetooth:onSuspend()
+    logger.dbg("Bluetooth.koplugin: Device suspending, disabling bluetooth")
+    self.controller:snapshotBeforeSuspend(function()
+        if self.settings:getDisableOnSuspend() then
+            self.controller:disable()
+        end
+    end)
+end
+
+function Bluetooth:onPause()
+    logger.dbg("Bluetooth.koplugin: Device pausing, disabling bluetooth")
+    self.controller:snapshotBeforeSuspend(function()
+        if self.settings:getDisableOnLock() then
+            self.controller:disable()
+        end
+    end)
 end
 
 return Bluetooth
