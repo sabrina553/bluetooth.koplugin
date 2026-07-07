@@ -13,6 +13,7 @@ local Bluez = require("bluetooth/controller/bluez")
 ---@field is_scanning boolean
 ---@field is_connected boolean
 ---@field is_disconnected boolean
+---@field device_store any
 ---@field KnownDevices Devices[]
 ---@field backend any
 ---@return controller
@@ -91,6 +92,90 @@ function controller:getDevice(mac)
     return nil
 end
 
+--- Re-applies persisted per-device app state (currently just `starred`) onto
+--- the live known_devices list, since knownDevices() builds fresh Devices
+--- instances every time it runs and bluetoothctl doesn't track this for us.
+function controller:applyStoredDeviceState()
+    if not self.device_store then
+        return
+    end
+    for _, dev in ipairs(self.known_devices or {}) do
+        local stored = self.device_store:get(dev.mac)
+        if stored then
+            dev.starred = stored.starred or false
+        end
+    end
+end
+
+--- Writes the current known_devices list to disk.
+function controller:persistDeviceState()
+    if not self.device_store then
+        return
+    end
+    self.device_store:saveAll(self.known_devices)
+end
+
+--- Returns every currently-known device with `starred == true`. Multiple
+--- devices may be starred simultaneously.
+---@return Devices[]
+function controller:getStarredDevices()
+    local starred = {}
+    for _, dev in ipairs(self.known_devices or {}) do
+        if dev.starred then
+            table.insert(starred, dev)
+        end
+    end
+    return starred
+end
+
+--- Call right before bluetooth gets torn down for suspend/pause. Refreshes
+--- device state one last time (so `connected` reflects reality) and snapshots
+--- it to disk — bluetoothctl won't remember "was connected right before
+--- suspend" once the radio's been power-cycled, so this is our only record.
+--- Takes a callback because knownDevices() can be async (e.g. on PocketBook,
+--- which needs to confirm the radio is on before it can query device info);
+--- persisting before that finishes would risk writing stale `connected`
+--- values.
+---@param callback fun()|nil
+function controller:snapshotBeforeSuspend(callback)
+    self:knownDevices(function()
+        self:persistDeviceState()
+        if callback then callback() end
+    end)
+end
+
+--- Call after bluetooth's been re-enabled and known_devices refreshed on
+--- wake. Reconnects every starred device and/or whatever was connected right
+--- before suspend, gated by the corresponding settings.
+function controller:reconnectOnWake()
+    if not self.settings or not self.device_store then
+        return
+    end
+
+    local wanted_macs = {}
+
+    if self.settings:getStarredOnWake() then
+        for _, entry in ipairs(self.device_store:getStarred()) do
+            wanted_macs[entry.mac] = true
+        end
+    end
+
+    if self.settings:getLastOnWake() then
+        for _, entry in ipairs(self.device_store:getConnected()) do
+            wanted_macs[entry.mac] = true
+        end
+    end
+
+    for mac in pairs(wanted_macs) do
+        local dev = self:getDevice(mac)
+        if dev then
+            logger.dbg("Bluetooth: reconnecting to " .. mac .. " on wake")
+            dev:connect()
+        else
+            logger.warn("Bluetooth: stored device " .. mac .. " not found among known_devices, skipping wake reconnect")
+        end
+    end
+end
 
 ---@param expected boolean 
 ---@param callback fun(confirmed: boolean)|nil 
@@ -165,12 +250,14 @@ function controller:knownDevices(callback)
             dev:refresh()
         end
 
+        self:applyStoredDeviceState()
+
         if callback then callback(true) end
         return self.known_devices
     end
 
     if self.backend == backends.PocketBook then
-        self:enableWhenDisabled(function(enabled_confirmed) -- this might need adjusting, such that it only enables on init, and not each time the function is called.
+        self:enableWhenDisabled(function(enabled_confirmed)
             if not enabled_confirmed then
                 if callback then callback(false) end
                 return
