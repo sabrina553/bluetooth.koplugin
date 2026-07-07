@@ -8,6 +8,12 @@ local logger = require("logger")
 ---@field enable_on_wake boolean
 ---@field starred_on_wake boolean
 ---@field last_on_wake boolean
+---@field update_channel string "stable" | "development"
+
+local UPDATE_CHANNELS = {
+    stable = true,
+    development = true,
+}
 
 local DEFAULTS = {
     disable_on_lock = false,
@@ -15,6 +21,7 @@ local DEFAULTS = {
     enable_on_wake = false,
     starred_on_wake = false,
     last_on_wake = false,
+    update_channel = "stable",
 }
 
 local function shallowCopy(t)
@@ -149,6 +156,27 @@ end
 
 function BluetoothSettings:toggleLastOnWake()
     self.data.last_on_wake = not self:getLastOnWake()
+    self:write()
+end
+
+function BluetoothSettings:getUpdateChannel()
+    local channel = self.data.update_channel or DEFAULTS.update_channel
+    if not UPDATE_CHANNELS[channel] then
+        -- Guards against a corrupted/unknown value ending up on disk; falls
+        -- back to stable rather than passing a bogus channel down into the
+        -- updater/GitHub API.
+        return DEFAULTS.update_channel
+    end
+    return channel
+end
+
+---@param channel string "stable" | "development"
+function BluetoothSettings:setUpdateChannel(channel)
+    if not UPDATE_CHANNELS[channel] then
+        logger:warn("Bluetooth Settings: ignoring unknown update channel", tostring(channel))
+        return
+    end
+    self.data.update_channel = channel
     self:write()
 end
 

@@ -250,6 +250,51 @@ function BluetoothMenu:getSettingsMenu()
     }
 end
 
+function BluetoothMenu:getUpdateChannelMenu()
+    return {
+        {
+            text = _("Stable"),
+            checked_func = function()
+                return self.settings:getUpdateChannel() == "stable"
+            end,
+            radio = true,
+            callback = function(touchmenu_instance)
+                self:setUpdateChannel("stable", touchmenu_instance)
+            end,
+            keep_menu_open = true,
+        },
+        {
+            text = _("Development"),
+            checked_func = function()
+                return self.settings:getUpdateChannel() == "development"
+            end,
+            radio = true,
+            callback = function(touchmenu_instance)
+                self:setUpdateChannel("development", touchmenu_instance)
+            end,
+            keep_menu_open = true,
+        },
+    }
+end
+
+--- Switches the update channel and immediately re-checks for a release on
+--- the new channel, since the updater's cached latest_known_version was
+--- fetched against whichever channel was active before this call.
+function BluetoothMenu:setUpdateChannel(channel, touchmenu_instance)
+    if self.settings:getUpdateChannel() == channel then
+        return
+    end
+
+    self.settings:setUpdateChannel(channel)
+    UIManager:broadcastEvent(Event:new("BluetoothSettingsChanged"))
+
+    local close_message = self:toast(_("Checking for updates…"), 0)
+    self.updater:fetchLatestVersion()
+    pcall(close_message)
+
+    self:refreshMenu(touchmenu_instance)
+end
+
 function BluetoothMenu:showSearchResults(on_refresh)
     local scan_duration = 15
     local poll_interval = 1
@@ -444,6 +489,10 @@ function BluetoothMenu:getAboutMenu()
             text = T(_("Version %1"), version),
             keep_menu_open = true,
             separator = true,
+        },
+        {
+            text = _("Update Channel"),
+            sub_item_table = self:getUpdateChannelMenu(),
         },
         {
             text_func = function()

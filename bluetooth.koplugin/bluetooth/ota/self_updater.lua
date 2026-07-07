@@ -180,14 +180,29 @@ function BluetoothSelfUpdater:getLatestReleaseVersion()
     return self.latest_known_version or current_version
 end
 
+--- Returns "stable" or "development". Falls back to "stable" if this
+--- updater was constructed without a settings object (shouldn't normally
+--- happen, but fetchLatestVersion/downloadLatestRelease shouldn't crash
+--- over it).
+function BluetoothSelfUpdater:getUpdateChannel()
+    if not self.settings then
+        return "stable"
+    end
+    return self.settings:getUpdateChannel()
+end
+
 function BluetoothSelfUpdater:fetchLatestVersion()
     if not PluginMetadata.hasRepository() then
         logger:warn("Unknown repository - cannot fetch latest version")
         return
     end
 
+    local channel = self:getUpdateChannel()
+    local include_prereleases = (channel == "development")
+
     local ok, version = self.github_api:getLatestReleaseVersion(
-        PluginMetadata.getRepository()
+        PluginMetadata.getRepository(),
+        include_prereleases
     )
 
     if not ok or not version then
@@ -195,6 +210,10 @@ function BluetoothSelfUpdater:fetchLatestVersion()
     end
 
     self.latest_known_version = version
+    -- Tracked so a caller (e.g. the menu) can tell whether the cached
+    -- latest_known_version was actually fetched for the channel currently
+    -- selected in settings, in case those ever drift apart.
+    self.latest_known_channel = channel
 end
 
 function BluetoothSelfUpdater:downloadLatestRelease(progress_callback)

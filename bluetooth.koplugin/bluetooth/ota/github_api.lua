@@ -94,10 +94,37 @@ function GithubAPI:request(method, uri, data, sink)
     return true, code, response
 end
 
+--- Fetches the latest release for a repository.
+---
+--- GitHub's `/releases/latest` endpoint always excludes prereleases and
+--- drafts, so it's only suitable for a "stable" channel. For a "development"
+--- channel that should include prereleases, we instead fetch the full
+--- `/releases` list (returned newest-first) and take the first entry that
+--- isn't a draft.
 ---@param repository string
----@return boolean
----@return string | nil
-function GithubAPI:getLatestReleaseVersion(repository)
+---@param include_prereleases boolean|nil
+---@return boolean ok
+---@return table|nil release
+function GithubAPI:getLatestRelease(repository, include_prereleases)
+    if include_prereleases then
+        local ok, _, response = self:request(
+            "GET",
+            self.base_uri .. "/repos/" .. repository .. "/releases"
+        )
+
+        if not ok or type(response) ~= "table" then
+            return false, nil
+        end
+
+        for _, release in ipairs(response) do
+            if not release.draft then
+                return true, release
+            end
+        end
+
+        return false, nil
+    end
+
     local ok, _, response = self:request(
         "GET",
         self.base_uri .. "/repos/" .. repository .. "/releases/latest"
@@ -107,7 +134,21 @@ function GithubAPI:getLatestReleaseVersion(repository)
         return false, nil
     end
 
-    return true, response.tag_name
+    return true, response
+end
+
+---@param repository string
+---@param include_prereleases boolean|nil
+---@return boolean
+---@return string | nil
+function GithubAPI:getLatestReleaseVersion(repository, include_prereleases)
+    local ok, release = self:getLatestRelease(repository, include_prereleases)
+
+    if not ok or not release then
+        return false, nil
+    end
+
+    return true, release.tag_name
 end
 
 ---@param repository string
