@@ -1,0 +1,41 @@
+name: Build and attach release asset
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the tagged commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      # Stage the plugin under a bluetooth.koplugin/ directory so the zip's
+      # internal layout matches what self_updater.lua's findPluginInArchive
+      # / extractPlugin expect (top-level folder ending in .koplugin,
+      # containing _meta.lua at its root).
+      - name: Stage plugin contents
+        run: |
+          mkdir -p staging/bluetooth.koplugin
+          rsync -a \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'staging' \
+            ./ staging/bluetooth.koplugin/
+
+      - name: Create zip
+        run: |
+          cd staging
+          zip -r ../bluetooth.koplugin.zip bluetooth.koplugin
+
+      - name: Upload asset to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: bluetooth.koplugin.zip

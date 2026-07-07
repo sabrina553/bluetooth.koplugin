@@ -103,16 +103,29 @@ local function parseVersion(version)
     local prerelease = nil
     local build = nil
 
-    if labels then
+    if labels and labels ~= "" then
         local build_indicator_index = labels:find("+") or (#labels + 1)
+        local pre_part = labels:sub(1, build_indicator_index - 1)
 
-        if labels:sub(1, 1) == "-" then
-            prerelease = labels:sub(2, build_indicator_index - 1)
-            labels = labels:sub(build_indicator_index)
+        -- Accept both a strict-semver hyphen ("0.0.2-dev1") and a plain dot
+        -- ("0.0.2.dev1", which is what this plugin's _meta.lua actually
+        -- uses). Treating only "-" as a valid separator meant dot-separated
+        -- dev versions parsed with prerelease == nil, making them
+        -- indistinguishable from an actual stable release of the same
+        -- major.minor.patch — which is exactly why "0.0.2.dev1" and "0.0.2"
+        -- were comparing as equal and no update was ever detected.
+        if pre_part:sub(1, 1) == "-" or pre_part:sub(1, 1) == "." then
+            prerelease = pre_part:sub(2)
+        elseif pre_part ~= "" then
+            -- Some other leftover suffix with no recognized separator at
+            -- all (e.g. "0.0.2dev1") - still treat it as a prerelease label
+            -- rather than silently dropping it, since a non-empty suffix
+            -- after patch always means "not the plain release".
+            prerelease = pre_part
         end
 
-        if labels:sub(1, 1) == "+" then
-            build = labels:sub(2)
+        if labels:sub(build_indicator_index, build_indicator_index) == "+" then
+            build = labels:sub(build_indicator_index + 1)
         end
     end
 
