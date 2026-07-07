@@ -186,11 +186,18 @@ end
 ---@param name_filter string | nil
 ---@return boolean ok Success of the request
 ---@return any | nil asset The asset or nothing
+---@return string | nil reason Why no asset was found, when ok is false
 function GithubAPI:getReleaseAsset(repository, version, name_filter)
     local ok, release = self:getRelease(repository, version)
 
     if not ok or not release then
-        return false, nil
+        return false, nil, "release " .. tostring(version) .. " not found"
+    end
+
+    if type(release.assets) ~= "table" or #release.assets == 0 then
+        return false, nil, "release " .. tostring(version) .. " has no uploaded assets " ..
+            "(does it only have GitHub's auto-generated source archive, " ..
+            "with no build artifact attached?)"
     end
 
     for _, asset in ipairs(release.assets) do
@@ -203,17 +210,18 @@ function GithubAPI:getReleaseAsset(repository, version, name_filter)
         end
     end
 
-    return false, nil
+    return false, nil, "no asset in release " .. tostring(version) ..
+        " matched pattern '" .. tostring(name_filter) .. "'"
 end
 
 ---@return boolean ok success
 ---@return string filename the filename on success or a message on failure
 ---@return table asset the asset definition
 function GithubAPI:downloadReleaseArchive(repository, version, name_filter, download_path, progress_callback)
-    local release_ok, asset = self:getReleaseAsset(repository, version, name_filter)
+    local release_ok, asset, reason = self:getReleaseAsset(repository, version, name_filter)
 
     if not release_ok then
-        return false, tostring(asset), {}
+        return false, reason or "could not find a matching release asset", {}
     end
 
     local download_file, file_error = io.open(download_path, "wb")
