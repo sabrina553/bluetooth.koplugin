@@ -7,6 +7,7 @@ local ButtonDialogTitle = require("ui/widget/buttondialogtitle")
 local UIManager = require("ui/uimanager")
 local Event = require("ui/event")
 local ButtonDialog = require("ui/widget/buttondialog")
+local logger = require("logger")
 
 local PluginMetadata = require("bluetooth/plugin_metadata")
 
@@ -242,6 +243,10 @@ function BluetoothMenu:getSettingsMenu()
             end,
             keep_menu_open = true,
             separator = true,
+        },
+        {
+            text = _("Update Channel"),
+            sub_item_table = self:getUpdateChannelMenu(),
         },
         {
             text = _("About"),
@@ -491,10 +496,6 @@ function BluetoothMenu:getAboutMenu()
             separator = true,
         },
         {
-            text = _("Update Channel"),
-            sub_item_table = self:getUpdateChannelMenu(),
-        },
-        {
             text_func = function()
                 if self.updater:isPendingRestart() then
                     return _("Update Pending Restart")
@@ -573,6 +574,32 @@ function BluetoothMenu:showPluginUpdateCheck(skip_version_check)
     })
 
     UIManager:show(dialog)
+end
+
+--- Actually performs the update: downloads the release asset, verifies it,
+--- and extracts it into place, using self.updater:update()'s progress
+--- callback to keep a single persistent toast up to date. This was
+--- previously called from showPluginUpdateCheck's "Update to vX" button but
+--- never defined, so tapping that button crashed with a nil-method error
+--- instead of ever starting a download.
+function BluetoothMenu:showPluginUpdater()
+    self:toast(_("Starting update…"), 0)
+
+    self.updater:update(function(stage, percent, message)
+        if stage == "download" then
+            self:toast(T(_("Downloading update… %1%%"), percent or 0), 0)
+        elseif stage == "complete" then
+            if self.info_message then
+                UIManager:close(self.info_message)
+                self.info_message = nil
+            end
+            UIManager:askForRestart(_("Bluetooth plugin update downloaded. Restart to apply."))
+        elseif stage == "failed" then
+            self:toast(T(_("Update failed: %1"), tostring(message or _("unknown error"))), 3)
+        else
+            logger:warn("Bluetooth: unexpected update progress stage", tostring(stage))
+        end
+    end)
 end
 
 function BluetoothMenu:toast(text, timeout)
