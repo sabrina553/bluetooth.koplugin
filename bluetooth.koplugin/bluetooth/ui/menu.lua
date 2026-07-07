@@ -134,7 +134,7 @@ function BluetoothMenu:pairedDevices(menu, knownDevices)
             -- Insert the menu item
             if dev.paired == true then
                 table.insert(menu, {
-                    text = dev.name,
+                    text = (dev.starred and "★ " or "") .. dev.name,
                     callback = function(touchmenu_instance)
 
                         local msg
@@ -405,9 +405,12 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
             },
             {
                 {
-                    text = _("Cancel"),
+                    text = dev.starred and _("Unstar") or _("Star"),
                     callback = function()
                         UIManager:close(dialog)
+                        dev:toggleStar(function()
+                            self:refreshMenu(touchmenu_instance)
+                        end)
                     end,
                 },
             },
