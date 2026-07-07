@@ -17,6 +17,12 @@ local DEFAULTS = {
     last_on_wake = false,
 }
 
+local function shallowCopy(t)
+    local copy = {}
+    for k, v in pairs(t) do copy[k] = v end
+    return copy
+end
+
 ---@class BluetoothSettings
 ---@field settings any
 ---@field data BluetoothSettingsData
@@ -27,7 +33,7 @@ local BluetoothSettings = {
 local SETTING_KEY = "bluetooth"
 
 local function openSettingsHandle()
-    local path = DataStorage:getSettingsDir() .. "/" .. SETTING_KEY .. "/" .. SETTING_KEY .. ".lua"
+    local path = DataStorage:getSettingsDir() .. "/" .. SETTING_KEY .. ".lua"
     return LuaSettings:open(path)
 end
 
@@ -42,14 +48,14 @@ end
 function BluetoothSettings:init()
     self.settings = openSettingsHandle()
     local success, result = pcall(function()
-        return self.settings:readSetting(SETTING_KEY, {}) or {}        
+        return self.settings:readSetting(SETTING_KEY, {}) or {}
     end)
 
     if success then
         self.data = result
     else
         logger:err("Bluetooth Settings: Error reading settings, using defaults", result)
-        self.data = DEFAULTS
+        self.data = shallowCopy(DEFAULTS)
         self:write()
     end
 end
@@ -119,7 +125,7 @@ function BluetoothSettings:toggleEnableOnWake()
 end
 
 function BluetoothSettings:getStarredOnWake()
-    return self.data.starred_on_wake or DEFAULTS.Starred_on_wake
+    return self.data.starred_on_wake or DEFAULTS.starred_on_wake
 end
 
 function BluetoothSettings:setStarredOnWake(starred_on_wake)
