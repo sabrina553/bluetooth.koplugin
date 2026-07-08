@@ -43,7 +43,7 @@ function bluez:new(ctrl)
 end
 
 function bluez:status()
-    local handle = io.popen('bluetoothctl show')
+    local handle = io.popen('bluetoothctl show &')
     local output = handle:read("*a")
     handle:close()
 
@@ -123,7 +123,8 @@ local function parseDeviceLine(line)
 end
 
 function bluez:knownDevices()
-    local handle = io.popen("bluetoothctl devices")
+    local handle = io.popen('echo -e "agent NoInputNoOutput\\ndefault-agent\\ndevices\\nquit\\n" | bluetoothctl &')
+    --local handle = io.popen("bluetoothctl devices")
     local output = handle:read("*a")
     handle:close()
 
@@ -137,6 +138,13 @@ function bluez:knownDevices()
     logger.dbg("Bluez: Found " .. #devices .. " known devices")
     return devices
 end
+
+--'echo -e "agent NoInputNoOutput\\ndefault-agent\\ndevices %s\\nquit\\n" | bluetoothctl &'
+
+    -- os.execute(string.format(
+    --     'echo -e "agent NoInputNoOutput\\ndefault-agent\\npair %s\\nquit\\n" | bluetoothctl &', -- maybe worth repeating this for other commands
+    --     mac
+    -- ))
 
 function bluez:search(duration)
     duration = duration or 15
