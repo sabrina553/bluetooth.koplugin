@@ -214,6 +214,61 @@ function GithubAPI:getReleaseAsset(repository, version, name_filter)
         " matched pattern '" .. tostring(name_filter) .. "'"
 end
 
+--- Resolves any HTTP redirects on a URL before it's used with a caller-
+--- supplied streaming sink (see downloadReleaseArchive).
+---
+--- GitHub's own docs for release assets are explicit that
+--- browser_download_url can respond with either a direct 200 or a 302
+--- redirecting to an S3-hosted URL, and that clients need to handle both.
+--- request() doesn't follow redirects - it only checks `code >= 400` for
+--- failure, so a 302 was silently treated as success while the sink
+--- received whatever (tiny, non-zip) body came attached to the redirect
+--- response itself. That's why downloads "succeeded" but failed digest
+--- verification: the bytes written to disk were never the actual asset.
+---
+--- Redirects are resolved here using a throwaway sink (we only care about
+--- the status code and Location header at this stage) so the real,
+--- caller-supplied sink is only ever handed the final, already-resolved
+--- URL.
+---@param uri string
+---@param max_redirects integer|nil
+---@return string resolved_uri
+function GithubAPI:resolveRedirects(uri, max_redirects)
+    max_redirects = max_redirects or 5
+
+    for _ = 1, max_redirects do
+        local client
+        if uri:match("^http:") then
+            client = http
+        elseif uri:match("^https:") then
+            client = https
+        else
+            return uri
+        end
+
+        local _, code, headers = client.request({
+            url = uri,
+            method = "GET",
+            headers = { ["User-Agent"] = self:getUserAgent() },
+            sink = function() return 1 end,
+        })
+
+        if type(code) ~= "number" then
+            return uri
+        end
+
+        local is_redirect = (code == 301 or code == 302 or code == 303 or code == 307 or code == 308)
+        if not is_redirect or not headers or not headers.location then
+            return uri
+        end
+
+        uri = headers.location
+    end
+
+    logger:warn("GithubAPI: exceeded max redirects resolving", uri)
+    return uri
+end
+
 ---@return boolean ok success
 ---@return string filename the filename on success or a message on failure
 ---@return table asset the asset definition
@@ -248,7 +303,8 @@ function GithubAPI:downloadReleaseArchive(repository, version, name_filter, down
         return 1
     end
 
-    local download_ok, code, message = self:request("GET", asset.browser_download_url, nil, sink)
+    local resolved_url = self:resolveRedirects(asset.browser_download_url)
+    local download_ok, code, message = self:request("GET", resolved_url, nil, sink)
 
     if not download_ok then
         os.remove(download_path)
