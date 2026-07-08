@@ -150,7 +150,7 @@ end
 
 function BluetoothMenu:refresh(touchmenu_instance)
     self.controller:status()
-    self.controller:knownDevices(touchmenu_instance)
+    self.controller:knownDevices()
     self:refreshMenu(touchmenu_instance)
 end
 
