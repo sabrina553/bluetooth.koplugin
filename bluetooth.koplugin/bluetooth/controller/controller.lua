@@ -177,17 +177,44 @@ function controller:reconnectOnWake()
     end
 end
 
+-- How long enable()/disable() wait before actually issuing the radio
+-- command. If a closely-spaced opposite call (e.g. resume right after
+-- suspend) supersedes this one within the window, the command is never
+-- sent at all - rather than sending "off" and "on" back-to-back straight
+-- to the daemon, which is what produced "No default controller available"
+-- on some devices. Adds a small, mostly-imperceptible delay to every
+-- deliberate single enable/disable too, which is the tradeoff for not
+-- sending contradictory commands to the radio in quick succession.
+local ENABLE_DISABLE_DEBOUNCE_S = 0.15
+
 ---@param expected boolean 
 ---@param callback fun(confirmed: boolean)|nil 
 ---@param attempt integer|nil internal, do not pass
-local function pollField(self, field, expected, callback, attempt)
+---@param generation integer the poll generation this call belongs to, captured
+---  by enable()/disable() at the moment they started polling. If a newer
+---  enable()/disable() call has since bumped self._poll_generation, this
+---  loop has been superseded and should stop quietly rather than keep
+---  polling and firing its own (now-stale) callback alongside the new one.
+local function pollField(self, field, expected, callback, attempt, generation)
+    if generation ~= self._poll_generation then
+        logger.dbg("Bluetooth: pollField for " .. field .. " superseded by a newer enable/disable call, stopping")
+        return
+    end
+
     logger.dbg ("Polling field: " .. field .. " for value: " .. tostring(expected))
 
     attempt = attempt or 1
     local max_attempts = 10
-    local delay_s = 0.5
+    local delay_s = 1
 
     self:status()
+
+    -- self:status() can itself take a moment on some backends; re-check
+    -- here too in case a newer enable/disable call landed while it ran.
+    if generation ~= self._poll_generation then
+        logger.dbg("Bluetooth: pollField for " .. field .. " superseded by a newer enable/disable call, stopping")
+        return
+    end
 
     if self[field] == expected then
         if callback then callback(true) end
@@ -200,7 +227,7 @@ local function pollField(self, field, expected, callback, attempt)
         return
     end
     UIManager:scheduleIn(delay_s, function()
-        pollField(self, field, expected, callback, attempt + 1)
+        pollField(self, field, expected, callback, attempt + 1, generation)
     end)
 end
 
@@ -212,14 +239,38 @@ end
 
 function controller:enable(callback)
     logger.dbg("Enabling Bluetooth Controller")
-    self:callDeviceFunction("enable")
-    pollField(self, "is_enabled", true, callback)
+    -- Bumping the generation here - before the debounced command even
+    -- fires - immediately supersedes any disable()/enable() call that
+    -- might still be pending or polling from an earlier, closely-spaced
+    -- call (e.g. suspend immediately followed by resume). Without this,
+    -- both could end up issuing os.execute('netagent bt on/off') and
+    -- polling status() concurrently against the same underlying radio.
+    self._poll_generation = (self._poll_generation or 0) + 1
+    local my_generation = self._poll_generation
+
+    UIManager:scheduleIn(ENABLE_DISABLE_DEBOUNCE_S, function()
+        if my_generation ~= self._poll_generation then
+            logger.dbg("Bluetooth: enable() superseded before its command was sent, skipping")
+            return
+        end
+        self:callDeviceFunction("enable")
+        pollField(self, "is_enabled", true, callback, nil, my_generation)
+    end)
 end
 
 function controller:disable(callback)
     logger.dbg("Disabling Bluetooth Controller")
-    self:callDeviceFunction("disable")
-    pollField(self, "is_enabled", false, callback)
+    self._poll_generation = (self._poll_generation or 0) + 1
+    local my_generation = self._poll_generation
+
+    UIManager:scheduleIn(ENABLE_DISABLE_DEBOUNCE_S, function()
+        if my_generation ~= self._poll_generation then
+            logger.dbg("Bluetooth: disable() superseded before its command was sent, skipping")
+            return
+        end
+        self:callDeviceFunction("disable")
+        pollField(self, "is_enabled", false, callback, nil, my_generation)
+    end)
 end
 
 function controller:toggle(callback)
@@ -234,9 +285,9 @@ end
 function controller:enableWhenDisabled(callback)
     self:status()
     if not self.is_enabled then
-        self:enable(callback)
+        return self:enable(callback)
     elseif callback then
-        callback(true)
+        return callback(true)
     end
 end
 
@@ -256,19 +307,38 @@ function controller:knownDevices(callback)
         return self.known_devices
     end
 
-    if self.backend == backends.PocketBook then
-        self:enableWhenDisabled(function(enabled_confirmed)
-            if not enabled_confirmed then
-                if callback then callback(false) end
-                return
-            end
-            refresh()
-        end)
+    local function pocketbook()
 
-        return self.known_devices
+        self:status()
+        if not self.is_enabled then
+            self:enable(function(enabled_confirmed)
+                if not enabled_confirmed then
+                    if callback then callback(false) end
+                    return
+                end
+
+                refresh()
+
+                self:disable(function(disable_confirmed)
+                    if not disable_confirmed then
+                        if callback then callback(false) end
+                        return
+                    end
+                end)
+            end)
+            self:status()
+            return self.known_devices
+
+        else
+            return refresh()
+        end
     end
 
-    return refresh()
+    --if self.backend == backends.PocketBook then
+    return pocketbook()
+    --end 
+
+    --return refresh()
 end
 
 function controller:search(callback, duration)
