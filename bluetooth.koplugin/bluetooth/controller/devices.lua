@@ -110,13 +110,13 @@ end
 
 function Devices:connect(callback)
     if not self.backend then
-        logger.warn("Devices:connect called with no backend set on device " .. tostring(self.mac))
+        logger.warn("Devices: connect called with no backend set on device " .. tostring(self.mac))
         if callback then callback(false) end
         return
     end
 
     if not self.controller then
-        logger.warn("Devices:connect called with no controller set on device " .. tostring(self.mac))
+        logger.warn("Devices: connect called with no controller set on device " .. tostring(self.mac))
         if callback then callback(false) end
         return
     end

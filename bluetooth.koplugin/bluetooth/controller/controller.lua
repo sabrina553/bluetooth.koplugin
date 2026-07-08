@@ -256,6 +256,8 @@ function controller:enable(callback)
         self:callDeviceFunction("enable")
         pollField(self, "is_enabled", true, callback, nil, my_generation)
     end)
+
+    return callback
 end
 
 function controller:disable(callback)
@@ -271,6 +273,8 @@ function controller:disable(callback)
         self:callDeviceFunction("disable")
         pollField(self, "is_enabled", false, callback, nil, my_generation)
     end)
+
+    return callback
 end
 
 function controller:toggle(callback)
