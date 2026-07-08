@@ -256,8 +256,6 @@ function controller:enable(callback)
         self:callDeviceFunction("enable")
         pollField(self, "is_enabled", true, callback, nil, my_generation)
     end)
-
-    return callback
 end
 
 function controller:disable(callback)
@@ -273,8 +271,6 @@ function controller:disable(callback)
         self:callDeviceFunction("disable")
         pollField(self, "is_enabled", false, callback, nil, my_generation)
     end)
-
-    return callback
 end
 
 function controller:toggle(callback)
@@ -291,12 +287,32 @@ function controller:enableWhenDisabled(callback)
     if not self.is_enabled then
         return self:enable(callback)
     elseif callback then
-        return callback(true)
+        -- Deferred to the next tick rather than called inline, so this
+        -- matches enable()'s async timing regardless of whether Bluetooth
+        -- happened to already be on - callers shouldn't have to care which
+        -- path fired to reason about ordering.
+        UIManager:scheduleIn(0, function() callback(true) end)
     end
 end
 
-function controller:knownDevices(callback)
+--- Refreshes self.known_devices from the backend.
+---
+--- Only PocketBook's netagent needs the radio actually on to answer a
+--- device query at all - other backends can just refresh directly. For
+--- PocketBook, if the radio is currently off, this enables it just long
+--- enough to read device info, then (by default) turns it back off again
+--- afterward, since being asked "what devices do you know about" shouldn't
+--- by itself leave the radio running.
+---
+---@param callback fun(confirmed: boolean)|nil invoked exactly once
+---@param opts table|nil { leave_enabled: boolean } - pass { leave_enabled =
+---  true } when the caller needs Bluetooth to stay on after this refresh
+---  completes (e.g. reconnectOnWake(), which needs to actually connect to
+---  devices right afterward - if this function turned the radio back off
+---  first, that connect would immediately fail).
+function controller:knownDevices(callback, opts)
     logger.dbg("Refreshing known devices")
+    opts = opts or {}
 
     local function refresh()
         self.known_devices = self:callDeviceFunction("knownDevices") or {}
@@ -306,43 +322,51 @@ function controller:knownDevices(callback)
         end
 
         self:applyStoredDeviceState()
+        return self.known_devices
+    end
 
+    if self.backend ~= backends.PocketBook then
+        refresh()
         if callback then callback(true) end
         return self.known_devices
     end
 
-    local function pocketbook()
-
-        self:status()
-        if not self.is_enabled then
-            self:enable(function(enabled_confirmed)
-                if not enabled_confirmed then
-                    if callback then callback(false) end
-                    return
-                end
-
-                refresh()
-
-                self:disable(function(disable_confirmed)
-                    if not disable_confirmed then
-                        if callback then callback(false) end
-                        return
-                    end
-                end)
-            end)
-            self:status()
-            return self.known_devices
-
-        else
-            return refresh()
-        end
+    self:status()
+    if self.is_enabled then
+        refresh()
+        if callback then callback(true) end
+        return self.known_devices
     end
 
-    --if self.backend == backends.PocketBook then
-    return pocketbook()
-    --end 
+    self:enable(function(enabled_confirmed)
+        if not enabled_confirmed then
+            if callback then callback(false) end
+            return
+        end
 
-    --return refresh()
+        refresh()
+
+        if not opts.leave_enabled then
+            -- We were the one who turned it on just to read this. Its
+            -- confirmation is independent of whether the refresh itself
+            -- succeeded, so it must NOT invoke `callback` again below -
+            -- that already fired once, and calling it a second time
+            -- (possibly with a contradictory result) is exactly the bug
+            -- this replaced.
+            self:disable(function(disable_confirmed)
+                if not disable_confirmed then
+                    logger.warn("Bluetooth: could not confirm re-disable after a knownDevices()-triggered enable")
+                end
+            end)
+        end
+
+        if callback then callback(true) end
+    end)
+
+    -- Necessarily stale here - the enable/refresh/disable chain above is
+    -- still in flight. Callers that need the fresh list must use the
+    -- callback, not this return value.
+    return self.known_devices
 end
 
 function controller:search(callback, duration)
