@@ -60,7 +60,7 @@ function Bluetooth:restoreBluetoothState()
         end
         self.controller:knownDevices(function()
             self.controller:reconnectOnWake() -- Have this disconnect the controller on failures :) 
-        end)
+        end, { leave_enabled = true })
     end
 
     if self.settings:getEnableOnWake() then
