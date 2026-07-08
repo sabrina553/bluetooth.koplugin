@@ -83,14 +83,18 @@ function BluetoothMenu:refreshMenu(touchmenu_instance)
     touchmenu_instance:updateItems()
 end
 
---- Builds the full Bluetooth submenu item table from current state.
+--- Builds the full Bluetooth submenu item table from current state. Must
+--- stay pure (just render self.controller.known_devices etc.) and never
+--- itself call refresh()/refreshMenu() - refresh() already calls back into
+--- this function via refreshMenu(), so doing so here created an
+--- unconditional buildMenuTable -> refresh -> refreshMenu -> buildMenuTable
+--- recursion with no base case, blowing the call stack after a few seconds
+--- of real (~1s each) bluetoothctl/netagent calls at each level.
 function BluetoothMenu:buildMenuTable()
-    self:refresh()
     local menu = {
         {
             text = _("Bluetooth"),
             callback = function(touchmenu_instance)
-                --self.controller:toggle(function(confirmed)
                 local msg
                 if self.controller.is_enabled then
                     msg = InfoMessage:new{ text = _("Disabling Bluetooth") }
@@ -144,14 +148,23 @@ function BluetoothMenu:buildMenuTable()
 end
 
 function BluetoothMenu:getTopMenu()
-    --self:refresh()
+    self:refresh()
     return self:buildMenuTable()
 end
 
 function BluetoothMenu:refresh(touchmenu_instance)
+    if self._refreshing then
+        logger:dbg("Bluetooth: refresh() re-entered while already running, skipping")
+        return
+    end
+
+    self._refreshing = true
+
     self.controller:status()
     self.controller:knownDevices()
     self:refreshMenu(touchmenu_instance)
+
+    self._refreshing = false
 end
 
 function BluetoothMenu:pairedDevices(menu, knownDevices)
