@@ -23,7 +23,7 @@ local function displayName(dev)
 end
 
 local function isNamed(dev)
-    return dev.name ~= nil and dev.name ~= ""
+    return dev.name ~= nil and dev.name ~= "" and dev.name ~= "Unknown"
 end
 
 local function buildItemTable(devices)
