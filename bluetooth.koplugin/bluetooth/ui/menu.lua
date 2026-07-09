@@ -190,7 +190,7 @@ function BluetoothMenu:buildMenuTable()
             sub_item_table = self:getSettingsMenu(),
         },
         {
-            text = _("Search Bluetooth"),
+            text = _("Scan"),
             callback = function(touchmenu_instance)
                 self:showSearchResults(function(confirmed)
                     self:refresh(touchmenu_instance)
