@@ -279,10 +279,6 @@ function BluetoothMenu:getSettingsMenu()
             separator = true,
         },
         {
-            text = _("Update Channel"),
-            sub_item_table = self:getUpdateChannelMenu(),
-        },
-        {
             text = _("About"),
             sub_item_table = self:getAboutMenu(),
         },
@@ -528,6 +524,10 @@ function BluetoothMenu:getAboutMenu()
             text = T(_("Version %1"), version),
             keep_menu_open = true,
             separator = true,
+        },
+        {
+            text = _("Update Channel"),
+            sub_item_table = self:getUpdateChannelMenu(),
         },
         {
             text_func = function()
