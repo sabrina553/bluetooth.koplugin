@@ -443,7 +443,7 @@ function BluetoothMenu:pairFoundDevice(dev, on_refresh)
         if confirmed then
             UIManager:show(InfoMessage:new{
                 text = _("Paired with ") .. displayName(dev),
-                timeout = 1,
+                timeout = 2,
             })
             local already_known = false
             for _, known in ipairs(self.controller.known_devices or {}) do
