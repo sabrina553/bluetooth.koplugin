@@ -16,7 +16,7 @@ Tested and Verified against:
 
 - PocketBook: Verse Pro (u634.6.10.3425)
 -           : Verse Pro Colour
--           : Era
+-           : Era Colour
 - Linux: Fedora 7.0.13 (running under the kodev simulator)
 
 As of now I expect this *should* work for all PocketBook devices that are based on linux. Aswell as any other linux devices.
