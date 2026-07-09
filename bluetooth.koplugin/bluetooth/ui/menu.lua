@@ -78,6 +78,59 @@ function BluetoothMenu:addToMainMenu(menu_items)
     }
 end
 
+-- Message text for each toggle-style device action, shared by
+-- pairedDevices() (the tap-to-connect row) and showDeviceActions() (the
+-- pair/trust/block/connect/star buttons in the hold-menu). All five follow
+-- the same shape: show a "Verb-ing…" toast, perform the toggle, then show
+-- a confirmation or failure toast based on the resulting state.
+local TOGGLE_ACTIONS = {
+    pair = {
+        field = "paired",
+        method = "togglePair",
+        active_text = _("Pairing…"),
+        inactive_text = _("Unpairing…"),
+        active_done_text = _("Paired with "),
+        inactive_done_text = _("Unpaired from "),
+        fail_text = _("Could not confirm pairing change for "),
+    },
+    trust = {
+        field = "trusted",
+        method = "toggleTrust",
+        active_text = _("Trusting…"),
+        inactive_text = _("Untrusting…"),
+        active_done_text = _("Trusted "),
+        inactive_done_text = _("Untrusted "),
+        fail_text = _("Could not confirm trust change for "),
+    },
+    block = {
+        field = "blocked",
+        method = "toggleBlock",
+        active_text = _("Blocking…"),
+        inactive_text = _("Unblocking…"),
+        active_done_text = _("Blocked "),
+        inactive_done_text = _("Unblocked "),
+        fail_text = _("Could not confirm block change for "),
+    },
+    connect = {
+        field = "connected",
+        method = "toggleConnection",
+        active_text = _("Connecting…"),
+        inactive_text = _("Disconnecting…"),
+        active_done_text = _("Connected to "),
+        inactive_done_text = _("Disconnected from "),
+        fail_text = _("Could not confirm connection change for "),
+    },
+    star = {
+        field = "starred",
+        method = "toggleStar",
+        active_text = _("Starring…"),
+        inactive_text = _("Unstarring…"),
+        active_done_text = _("Starred "),
+        inactive_done_text = _("Unstarred "),
+        fail_text = _("Could not confirm star change for "),
+    },
+}
+
 function BluetoothMenu:refreshMenu(touchmenu_instance)
     touchmenu_instance = touchmenu_instance or self.touchmenu_instance
     if not touchmenu_instance then
@@ -171,6 +224,38 @@ function BluetoothMenu:refresh(touchmenu_instance)
     self._refreshing = false
 end
 
+--- Runs one of TOGGLE_ACTIONS against dev: shows a "Verb-ing…" toast,
+--- performs the toggle, then shows a confirmation or failure toast based on
+--- the resulting state, and refreshes the menu. Used for the paired-device
+--- row's tap-to-connect and every button in showDeviceActions()'s
+--- hold-menu (pair/trust/block/connect/star) - these were five
+--- near-identical copies of this same shape before.
+---@param dev Devices
+---@param action table one of the TOGGLE_ACTIONS entries
+---@param touchmenu_instance any
+function BluetoothMenu:performToggle(dev, action, touchmenu_instance)
+    local msg = InfoMessage:new{
+        text = dev[action.field] and action.inactive_text or action.active_text
+    }
+    UIManager:show(msg)
+
+    dev[action.method](dev, function(confirmed)
+        UIManager:close(msg)
+        if confirmed then
+            UIManager:show(InfoMessage:new{
+                text = (dev[action.field] and action.active_done_text or action.inactive_done_text) .. dev.name,
+                timeout = 1,
+            })
+        else
+            UIManager:show(InfoMessage:new{
+                text = action.fail_text .. dev.name,
+                timeout = 2,
+            })
+        end
+        self:refresh(touchmenu_instance)
+    end)
+end
+
 function BluetoothMenu:pairedDevices(menu, knownDevices)
     if knownDevices ~= nil then
         -- Iterate over the known Devices objects
@@ -180,35 +265,7 @@ function BluetoothMenu:pairedDevices(menu, knownDevices)
                 table.insert(menu, {
                     text = (dev.starred and "★ " or "") .. dev.name,
                     callback = function(touchmenu_instance)
-
-                        local msg
-                        if dev.connected then
-                            msg = InfoMessage:new{ text = _("Disconnecting…") }
-                        else
-                            msg = InfoMessage:new{ text = _("Connecting…") }
-                        end
-                        UIManager:show(msg)
-                        dev:toggleConnection(function(confirmed)
-                            UIManager:close(msg)
-                            if confirmed and dev.connected then
-                                UIManager:show(InfoMessage:new{
-                                    text = _("Connected to ") .. dev.name,
-                                    timeout = 1,
-                                })
-                            elseif not dev.connected then
-                                UIManager:show(InfoMessage:new{
-                                    text = _("Disconnected from ") .. dev.name,
-                                    timeout = 1,
-                                })
-                            else
-                                UIManager:show(InfoMessage:new{
-                                    text = _("Could not confirm connection to ") .. dev.name,
-                                    timeout = 2,
-                                })
-                            end
-
-                            self:refresh(touchmenu_instance)
-                        end)
+                        self:performToggle(dev, TOGGLE_ACTIONS.connect, touchmenu_instance)
                     end,
                     checked_func = function()
                         return dev.connected
@@ -437,45 +494,21 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
                     text = dev.paired and _("Unpair") or _("Pair"),
                     callback = function()
                         UIManager:close(dialog)
-                        dev:togglePair(function(confirmed)
-                            if not confirmed then
-                                UIManager:show(InfoMessage:new{
-                                    text = _("Could not confirm pairing change for ") .. dev.name,
-                                    timeout = 2,
-                                })
-                            end
-                            self:refresh(touchmenu_instance)
-                        end)
+                        self:performToggle(dev, TOGGLE_ACTIONS.pair, touchmenu_instance)
                     end,
                 },
                 {
                     text = dev.trusted and _("Untrust") or _("Trust"),
                     callback = function()
                         UIManager:close(dialog)
-                        dev:toggleTrust(function(confirmed)
-                            if not confirmed then
-                                UIManager:show(InfoMessage:new{
-                                    text = _("Could not confirm trust change for ") .. dev.name,
-                                    timeout = 2,
-                                })
-                            end
-                            self:refresh(touchmenu_instance)
-                        end)
+                        self:performToggle(dev, TOGGLE_ACTIONS.trust, touchmenu_instance)
                     end,
                 },
                 {
                     text = dev.blocked and _("Unblock") or _("Block"),
                     callback = function()
                         UIManager:close(dialog)
-                        dev:toggleBlock(function(confirmed)
-                            if not confirmed then
-                                UIManager:show(InfoMessage:new{
-                                    text = _("Could not confirm block change for ") .. dev.name,
-                                    timeout = 2,
-                                })
-                            end
-                            self:refresh(touchmenu_instance)
-                        end)
+                        self:performToggle(dev, TOGGLE_ACTIONS.block, touchmenu_instance)
                     end,
                     separator = true,
                 },
@@ -486,15 +519,7 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
                     text = dev.connected and _("Disconnect") or _("Connect"),
                     callback = function()
                         UIManager:close(dialog)
-                        dev:toggleConnection(function(confirmed)
-                            if not confirmed then
-                                UIManager:show(InfoMessage:new{
-                                    text = _("Could not confirm connection change for ") .. dev.name,
-                                    timeout = 2,
-                                })
-                            end
-                            self:refresh(touchmenu_instance)
-                        end)
+                        self:performToggle(dev, TOGGLE_ACTIONS.connect, touchmenu_instance)
                     end,
                 },
             },
@@ -503,9 +528,7 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
                     text = dev.starred and _("Unstar") or _("Star"),
                     callback = function()
                         UIManager:close(dialog)
-                        dev:toggleStar(function()
-                            self:refresh(touchmenu_instance)
-                        end)
+                        self:performToggle(dev, TOGGLE_ACTIONS.star, touchmenu_instance)
                     end,
                 },
             },
