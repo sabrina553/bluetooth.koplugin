@@ -13,6 +13,10 @@ local PluginMetadata = require("bluetooth/plugin_metadata")
 
 local function displayName(dev)
     if dev.name and dev.name ~= "" then
+        if dev.name == "Unknown" then
+            return dev.mac
+        end
+
         return dev.name
     end
     return dev.mac
