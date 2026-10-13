@@ -9,6 +9,7 @@ local util = require("util")
 local sha2 = require("ffi/sha2")
 
 local PluginMetadata = require("bluetooth/plugin_metadata")
+local PluginPath = require("bluetooth/plugin_path")
 local SafePath = require("bluetooth/ota/safe_path")
 local Version = require("bluetooth/ota/version")
 local logger = require("logger")
@@ -48,27 +49,6 @@ local function verifyDigest(path, digest)
     return true
 end
 
---- Walks up from this file's own location until it finds a directory
---- ending in `.koplugin`. This has to walk up (rather than just checking
---- the immediate parent) because self_updater.lua may be nested arbitrarily
---- deep inside the plugin (e.g. under `ota/`), and checking only one level
---- silently falls through to the hardcoded fallback path below, which can
---- point at the wrong install location entirely.
-local function getPluginPath()
-    local source = debug.getinfo(1, "S").source
-    local path = source:match("@(.*)")
-    local dir = path and path:match("(.*)/")
-
-    while dir and dir ~= "" do
-        if dir:match("%.koplugin$") then
-            return dir
-        end
-        dir = dir:match("(.*)/")
-    end
-
-    return DataStorage:getDataDir() .. "/plugins/bluetooth.koplugin"
-end
-
 --- Locates the plugin's root directory inside the downloaded archive by
 --- finding `_meta.lua` and confirming it actually declares our repository
 --- (not just any file that happens to be named `_meta.lua`, which could
@@ -102,7 +82,7 @@ end
 ---@field latest_known_version string | nil
 ---@field is_pending_restart boolean
 local BluetoothSelfUpdater = {
-    plugin_path = getPluginPath(),
+    plugin_path = PluginPath.get() or (DataStorage:getDataDir() .. "/plugins/bluetooth.koplugin"),
     release_asset_name = "^bluetooth%.koplugin%.zip$",
     release_cache_path = DataStorage:getDataDir() .. "/cache/bluetooth"
 }
