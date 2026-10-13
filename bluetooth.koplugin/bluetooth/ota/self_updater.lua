@@ -1,5 +1,6 @@
 local g = require("gettext")
-local T = require("ffi/util").template
+local ffiUtil = require("ffi/util")
+local T = ffiUtil.template
 
 local Archiver = require("ffi/archiver")
 local DataStorage = require("datastorage")
@@ -8,6 +9,7 @@ local util = require("util")
 local sha2 = require("ffi/sha2")
 
 local PluginMetadata = require("bluetooth/plugin_metadata")
+local SafePath = require("bluetooth/ota/safe_path")
 local Version = require("bluetooth/ota/version")
 local logger = require("logger")
 
@@ -221,7 +223,10 @@ function BluetoothSelfUpdater:downloadLatestRelease(progress_callback)
     return true, download_path
 end
 
---- Extracts the plugin's files from the downloaded archive into target_path.
+--- Extracts the plugin's files from the downloaded archive into a staging
+--- directory beside target_path, then swaps it into place. A failure part way
+--- through leaves the installed plugin untouched, and files the new version
+--- no longer ships disappear with the old directory.
 ---
 --- Uses two separate passes over the archive: one to locate the plugin root
 --- (findPluginInArchive) and one to actually extract entries. Since the
@@ -229,16 +234,13 @@ end
 --- between passes rather than assuming a second :iterate() call picks up
 --- where the first left off (or works at all).
 function BluetoothSelfUpdater:extractPlugin(source_path, target_path)
+    -- Neither name ends in ".koplugin", so KOReader's plugin loader ignores them.
+    local staging_path = target_path .. ".new"
+    local backup_path = target_path .. ".bak"
+
     local reader = Archiver.Reader:new()
     if not reader:open(source_path) then
         return false, g("Failed to open downloaded archive.")
-    end
-
-    local directory_exists, directory_error_message = util.makePath(target_path)
-    if not directory_exists then
-        reader:close()
-
-        return false, directory_error_message
     end
 
     local plugin_root = findPluginInArchive(reader, PluginMetadata.getRepository())
@@ -249,15 +251,21 @@ function BluetoothSelfUpdater:extractPlugin(source_path, target_path)
         return false, g("Could not locate plugin root (_meta.lua) in archive.")
     end
 
+    ffiUtil.purgeDir(staging_path) -- leftovers from an earlier failed attempt
+    local directory_exists, directory_error_message = util.makePath(staging_path)
+    if not directory_exists then
+        return false, directory_error_message
+    end
+
     reader = Archiver.Reader:new()
     if not reader:open(source_path) then
+        ffiUtil.purgeDir(staging_path)
         return false, g("Failed to re-open downloaded archive.")
     end
 
     -- plugin_root comes from util.splitFilePathName, which already ends in "/"
     -- (https://github.com/koreader/koreader/blob/master/frontend/util.lua).
-    -- Appending another one matched nothing, so updates "succeeded" with zero
-    -- files. The trailing slash keeps this a path-segment match, so a sibling
+    -- The trailing slash keeps this a path-segment match, so a sibling
     -- such as "bluetooth.koplugin-legacy/" isn't extracted too.
     local prefix = plugin_root
     local extracted_count = 0
@@ -266,7 +274,13 @@ function BluetoothSelfUpdater:extractPlugin(source_path, target_path)
         if entry.mode == "file" and entry.path:sub(1, #prefix) == prefix then
             local entry_path = entry.path:sub(#prefix + 1)
 
-            local extract_path = target_path .. "/" .. entry_path
+            if not SafePath.isSafeRelative(entry_path) then
+                reader:close()
+                ffiUtil.purgeDir(staging_path)
+                return false, T(g("Unsafe path in archive: %1"), entry.path)
+            end
+
+            local extract_path = staging_path .. "/" .. entry_path
 
             local parent, _ = util.splitFilePathName(extract_path)
             if parent and parent ~= "" then
@@ -277,6 +291,7 @@ function BluetoothSelfUpdater:extractPlugin(source_path, target_path)
 
             if not ok then
                 reader:close()
+                ffiUtil.purgeDir(staging_path)
                 return false, T(g("Failed to extract file: %1"), entry.path)
             end
             extracted_count = extracted_count + 1
@@ -287,8 +302,23 @@ function BluetoothSelfUpdater:extractPlugin(source_path, target_path)
 
     -- Never report success for an update that installed nothing.
     if extracted_count == 0 then
+        ffiUtil.purgeDir(staging_path)
         return false, g("No plugin files found in archive.")
     end
+
+    -- Swap. Renames within one directory are atomic, so the only window with
+    -- no plugin in place is between the two renames.
+    ffiUtil.purgeDir(backup_path)
+    if not os.rename(target_path, backup_path) then
+        ffiUtil.purgeDir(staging_path)
+        return false, g("Could not move the installed plugin aside.")
+    end
+    if not os.rename(staging_path, target_path) then
+        os.rename(backup_path, target_path) -- put the old version back
+        ffiUtil.purgeDir(staging_path)
+        return false, g("Could not move the new plugin into place.")
+    end
+    ffiUtil.purgeDir(backup_path)
 
     return true, nil
 end
