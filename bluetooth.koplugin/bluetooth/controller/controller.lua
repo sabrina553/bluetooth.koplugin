@@ -204,6 +204,10 @@ local ENABLE_DISABLE_DEBOUNCE_S = 0.15
 ---@param expected boolean 
 ---@param callback fun(confirmed: boolean)|nil 
 ---@param attempt integer|nil internal, do not pass
+--- The callback always fires exactly once: true if confirmed, false if it
+--- timed out or a newer enable/disable superseded this call (the newer call
+--- decides the final state). Dropping it silently left connect/scan waiting
+--- forever after a suspend/resume.
 ---@param generation integer the poll generation this call belongs to, captured
 ---  by enable()/disable() at the moment they started polling. If a newer
 ---  enable()/disable() call has since bumped self._poll_generation, this
@@ -212,6 +216,7 @@ local ENABLE_DISABLE_DEBOUNCE_S = 0.15
 local function pollField(self, field, expected, callback, attempt, generation)
     if generation ~= self._poll_generation then
         logger.dbg("Bluetooth: pollField for " .. field .. " superseded by a newer enable/disable call, stopping")
+        if callback then callback(false) end
         return
     end
 
@@ -227,6 +232,7 @@ local function pollField(self, field, expected, callback, attempt, generation)
     -- here too in case a newer enable/disable call landed while it ran.
     if generation ~= self._poll_generation then
         logger.dbg("Bluetooth: pollField for " .. field .. " superseded by a newer enable/disable call, stopping")
+        if callback then callback(false) end
         return
     end
 
@@ -265,6 +271,7 @@ function controller:enable(callback)
     UIManager:scheduleIn(ENABLE_DISABLE_DEBOUNCE_S, function()
         if my_generation ~= self._poll_generation then
             logger.dbg("Bluetooth: enable() superseded before its command was sent, skipping")
+            if callback then callback(false) end
             return
         end
         self:callDeviceFunction("enable")
@@ -280,6 +287,7 @@ function controller:disable(callback)
     UIManager:scheduleIn(ENABLE_DISABLE_DEBOUNCE_S, function()
         if my_generation ~= self._poll_generation then
             logger.dbg("Bluetooth: disable() superseded before its command was sent, skipping")
+            if callback then callback(false) end
             return
         end
         self:callDeviceFunction("disable")

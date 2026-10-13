@@ -91,5 +91,36 @@ do
     check(not calls.enable and not calls.disable, "on: no power change")
 end
 
+-- Runs queued UIManager work, including work queued while running.
+local function drain()
+    local guard = 0
+    while #queue > 0 and guard < 100 do
+        guard = guard + 1
+        table.remove(queue, 1)()
+    end
+end
+
+-- Superseded before its command is sent: the callback still fires, once, false.
+do
+    local c, calls = build(false)
+    local got = {}
+    c:enable(function(ok) table.insert(got, "enable:" .. tostring(ok)) end)
+    c:disable(function(ok) table.insert(got, "disable:" .. tostring(ok)) end)
+    drain()
+    check(table.concat(got, ",") == "enable:false,disable:true", "superseded before send: got " .. table.concat(got, ","))
+    check(not calls.enable and calls.disable == 1, "superseded before send: only disable sent")
+end
+
+-- Superseded while polling: the stale poll calls back false, once.
+do
+    local c = build(false)
+    local got = {}
+    c:enable(function(ok) table.insert(got, "enable:" .. tostring(ok)) end)
+    table.remove(queue, 1)() -- debounce fires, enable sent, poll retry queued
+    c:disable(function(ok) table.insert(got, "disable:" .. tostring(ok)) end)
+    drain()
+    check(table.concat(got, ",") == "enable:false,disable:true", "superseded while polling: got " .. table.concat(got, ","))
+end
+
 if failures > 0 then os.exit(1) end
 print("controller_test: ok")
