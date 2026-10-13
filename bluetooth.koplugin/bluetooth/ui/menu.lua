@@ -211,7 +211,7 @@ end
 
 function BluetoothMenu:refresh(touchmenu_instance)
     if self._refreshing then
-        logger:dbg("Bluetooth: refresh() re-entered while already running, skipping")
+        logger.dbg("Bluetooth: refresh() re-entered while already running, skipping")
         return
     end
 
@@ -669,7 +669,7 @@ function BluetoothMenu:showPluginUpdater()
         elseif stage == "failed" then
             self:toast(T(_("Update failed: %1"), tostring(message or _("unknown error"))), 3)
         else
-            logger:warn("Bluetooth: unexpected update progress stage", tostring(stage))
+            logger.warn("Bluetooth: unexpected update progress stage", tostring(stage))
         end
     end)
 end

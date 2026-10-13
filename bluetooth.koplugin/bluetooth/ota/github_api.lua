@@ -69,17 +69,17 @@ function GithubAPI:request(method, uri, data, sink)
         if success then
             response = decodedResponse
         else
-            logger:warn("Failed to parse JSON:", response_text)
+            logger.warn("Failed to parse JSON:", response_text)
         end
     end
 
     if type(code) ~= "number" then
-        logger:err("Non-numeric response code received:", tostring(code))
+        logger.err("Non-numeric response code received:", tostring(code))
         return false, 0, "Connection error: " .. tostring(code)
     end
 
     if code >= 400 then
-        logger:dbg("bluetooth Connector Request Error", method, uri, code, response)
+        logger.dbg("bluetooth Connector Request Error", method, uri, code, response)
         if type(response) == "table" then
             if response.message then
                 response = response.message
@@ -234,7 +234,7 @@ function GithubAPI:resolveRedirects(uri, max_redirects)
         uri = headers.location
     end
 
-    logger:warn("GithubAPI: exceeded max redirects resolving", uri)
+    logger.warn("GithubAPI: exceeded max redirects resolving", uri)
     return uri
 end
 
