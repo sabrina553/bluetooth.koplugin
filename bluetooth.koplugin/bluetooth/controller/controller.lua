@@ -62,6 +62,7 @@ function controller:callDeviceFunction(action, variable)
     if self.backend and self.backend[action] then
         return self.backend[action](self.backend, variable)
     else
+        logger.warn("Bluetooth: backend has no action", tostring(action))
         UIManager:show(InfoMessage:new { text = _("Unsupported Bluetooth action on this device"), timeout = 2, })
     end
 end
