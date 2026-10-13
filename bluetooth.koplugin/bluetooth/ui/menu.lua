@@ -283,17 +283,6 @@ end
 function BluetoothMenu:getSettingsMenu()
      return {
         {
-            text = _("Enable on Wake"),
-            checked_func = function()
-                return self.settings:getEnableOnWake()
-            end,
-            callback = function()
-                self.settings:toggleEnableOnWake()
-                UIManager:broadcastEvent(Event:new("BluetoothSettingsChanged"))
-            end,
-            keep_menu_open = true,
-        },
-        {
             text = _("Disable on Suspend"),
             checked_func = function()
                 return self.settings:getDisableOnSuspend()

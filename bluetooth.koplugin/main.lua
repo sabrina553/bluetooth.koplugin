@@ -63,36 +63,50 @@ function Bluetooth:init()
     -- nothing woke up: restoring then switched Bluetooth back on after the
     -- user had turned it off. Wake-ups are handled by onResume.
     if Session.isColdStart() then
-        self:restoreBluetoothState()
+        self:restoreBluetoothState(false)
     end
 
     logger.dbg("Bluetooth.koplugin: Initialized")
 end
 
-function Bluetooth:restoreBluetoothState()
-    local function afterEnabled(enabled_confirmed)
+--- Reconnects devices after a start or wake-up. The radio is only switched
+--- on again (`allow_enable`) to undo our own disable-on-suspend; it is never
+--- turned on just because the reader started or woke.
+--- Decision: 2026-10-13 session note (auto-connect, never auto-enable).
+---@param allow_enable boolean
+function Bluetooth:restoreBluetoothState(allow_enable)
+    local function reconnect()
+        self.controller:knownDevices(function()
+            self.controller:reconnectOnWake()
+        end, { leave_enabled = true })
+    end
+
+    self.controller:status()
+    if self.controller.is_enabled then
+        return reconnect()
+    end
+
+    if not allow_enable then
+        logger.dbg("Bluetooth.koplugin: Bluetooth is off, leaving it off")
+        return
+    end
+
+    self.controller:enableWhenDisabled(function(enabled_confirmed)
         if not enabled_confirmed then
             logger.warn("Bluetooth.koplugin: could not confirm bluetooth enabled, skipping reconnect")
             return
         end
-        self.controller:knownDevices(function()
-            self.controller:reconnectOnWake() -- Have this disconnect the controller on failures :) 
-        end, { leave_enabled = true })
-    end
-
-    if self.settings:getEnableOnWake() then
-        self.controller:enableWhenDisabled(afterEnabled)
-    else
-        self.controller:status()
-        if self.controller.is_enabled then
-            afterEnabled(true)
-        end
-    end
+        reconnect()
+    end)
 end
 
 function Bluetooth:onResume()
     logger.dbg("Bluetooth.koplugin: Device resumed, Restoring Bluetooth")
-    self:restoreBluetoothState()
+    -- Only restore a radio that was on before the suspend; one the user had
+    -- turned off stays off.
+    local was_enabled = self.controller.was_enabled_before_suspend
+    self.controller.was_enabled_before_suspend = nil
+    self:restoreBluetoothState(was_enabled == true)
 end
 
 function Bluetooth:onSuspend()
