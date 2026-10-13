@@ -82,6 +82,15 @@ function Bluetooth:restoreBluetoothState(allow_enable)
     end
 
     self.controller:status()
+    -- A resume right after suspend finds the radio still reading on while our
+    -- disable is in flight; reconnecting then would talk to a dying daemon.
+    -- enable() supersedes the disable and waits for the radio to go down.
+    if self.controller:isDisabling() and allow_enable then
+        self.controller:enable(function(enabled_confirmed)
+            if enabled_confirmed then reconnect() end
+        end)
+        return
+    end
     if self.controller.is_enabled then
         return reconnect()
     end
