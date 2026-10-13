@@ -84,6 +84,10 @@ end
 -- pair/trust/block/connect/star buttons in the hold-menu). All five follow
 -- the same shape: show a "Verb-ing…" toast, perform the toggle, then show
 -- a confirmation or failure toast based on the resulting state.
+-- Confirmation toasts: long enough to read "Connected", short enough not to
+-- linger over the redrawn menu (Sabrina, 2026-10-13: 1 s looked ugly).
+local DONE_TOAST_S = 0.25
+
 local TOGGLE_ACTIONS = {
     pair = {
         field = "paired",
@@ -207,12 +211,12 @@ function BluetoothMenu:buildMenuTable()
                     if confirmed and self.controller.is_enabled then
                         UIManager:show(InfoMessage:new{
                             text = _("Bluetooth Enabled"),
-                            timeout = 1,
+                            timeout = DONE_TOAST_S,
                         })
                     elseif not self.controller.is_enabled then
                         UIManager:show(InfoMessage:new{
                             text = _("Bluetooth Disabled"),
-                            timeout = 1,
+                            timeout = DONE_TOAST_S,
                         })
                     else
                         UIManager:show(InfoMessage:new{
@@ -284,27 +288,27 @@ end
 function BluetoothMenu:startPolling()
     local token = {}
     self._poll_token = token
+    local seen = false
     local function tick()
         if self._poll_token ~= token then
             return
         end
-    local seen = false
         if not self:findTouchMenu() then
             -- Closed. Settings and About do not count: back returns to us.
-            self._poll_token = nil
-            return
-        end
-        -- The scan screen polls the list itself.
             -- Never having found it means findTouchMenu's assumptions about
             -- KOReader's widget layout no longer hold, so say so in the log.
             if not seen then
                 logger.warn("Bluetooth: menu not found on the first poll, "
                     .. "KOReader's TouchMenu layout may have changed; polling stopped")
             end
+            self._poll_token = nil
+            return
+        end
+        seen = true
+        -- The scan screen polls the list itself.
         if not self._scan_token then
             self.controller:statusCached(function()
                 UIManager:nextTick(function()
-        seen = true
                     if self._poll_token == token then self:refresh() end
                 end)
             end)
@@ -373,10 +377,14 @@ function BluetoothMenu:performToggle(dev, action, touchmenu_instance)
 
     dev[action.method](dev, function(confirmed)
         UIManager:close(msg)
+        -- The toast reads dev, not a fresh lookup: pollField confirmed the
+        -- result on this object, while a poll mid-action can install a newer
+        -- one read before the action finished (it said "Disconnected" after a
+        -- good connect from off, 2026-10-13 reader log).
         if confirmed then
             UIManager:show(InfoMessage:new{
                 text = (dev[action.field] and action.active_done_text or action.inactive_done_text) .. dev.name,
-                timeout = 1,
+                timeout = DONE_TOAST_S,
             })
         else
             UIManager:show(InfoMessage:new{
