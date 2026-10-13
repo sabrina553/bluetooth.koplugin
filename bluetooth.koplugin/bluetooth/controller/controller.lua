@@ -259,7 +259,49 @@ end
 
 function controller:status()
     logger.dbg("Checking Bluetooth status")
+    self._status_seq = (self._status_seq or 0) + 1
     self.is_enabled = self:callDeviceFunction("status")
+end
+
+--- For code that only displays the state (menu, device list): returns at
+--- once with the last known value and refreshes it in the background, then
+--- calls on_change(enabled) if the value turned out different. Anything that
+--- decides what to do with the radio (toggle, suspend, wake) still uses
+--- status(), because a stale answer there would act on the wrong state.
+--- A result is dropped if status() or enable()/disable() ran meanwhile.
+---@param on_change fun(enabled: boolean)|nil
+---@return boolean|nil
+function controller:statusCached(on_change)
+    if self.is_enabled == nil or not (self.backend and self.backend.readStatus) then
+        self:status()
+        return self.is_enabled
+    end
+    -- Every caller's on_change is kept, not just the one that started the
+    -- check: a check begun by the list read must still redraw the menu.
+    self._status_listeners = self._status_listeners or {}
+    if on_change then table.insert(self._status_listeners, on_change) end
+    if not self._status_reading then
+        self._status_reading = true
+        local seq, generation = self._status_seq, self._poll_generation
+        self.backend:readStatus(function(enabled)
+            self._status_reading = false
+            local listeners = self._status_listeners
+            self._status_listeners = {}
+            if enabled == nil or seq ~= self._status_seq or generation ~= self._poll_generation then
+                logger.dbg(string.format("Bluetooth: background status dropped (answer %s, newer check %s, radio changed %s)",
+                    tostring(enabled), tostring(seq ~= self._status_seq), tostring(generation ~= self._poll_generation)))
+                return
+            end
+            logger.dbg("Bluetooth: background status says " .. (enabled and "on" or "off") ..
+                ", cached " .. tostring(self.is_enabled) .. ", " .. #listeners .. " listener(s)")
+            if enabled ~= self.is_enabled then
+                logger.info("Bluetooth: radio is now " .. (enabled and "on" or "off") .. " (background check)")
+                self.is_enabled = enabled
+                for _, listener in ipairs(listeners) do listener(enabled) end
+            end
+        end)
+    end
+    return self.is_enabled
 end
 
 --- True while a disable() has been called and not yet confirmed or superseded.
@@ -515,7 +557,7 @@ function controller:knownDevices(callback, opts)
     logger.dbg("Refreshing known devices")
 
     if self.backend == backends.PocketBook then
-        self:status()
+        self:statusCached()
         if not self.is_enabled or self:isDisabling() then
             self.known_devices = self:devicesFromStore()
             self:applyStoredDeviceState()

@@ -71,8 +71,9 @@ function BluetoothMenu:addToMainMenu(menu_items)
     menu_items.bluetooth = {
         text = _("Bluetooth"),
         sorting_hint = "tools",
-        sub_item_table_func = function(touchmenu_instance)
-            self.touchmenu_instance = touchmenu_instance
+        -- KOReader calls this with no arguments (touchmenu.lua onMenuSelect),
+        -- so the TouchMenu is found later with findTouchMenu().
+        sub_item_table_func = function()
             return self:getTopMenu()
         end,
     }
@@ -83,6 +84,10 @@ end
 -- pair/trust/block/connect/star buttons in the hold-menu). All five follow
 -- the same shape: show a "Verb-ing…" toast, perform the toggle, then show
 -- a confirmation or failure toast based on the resulting state.
+-- Confirmation toasts: long enough to read "Connected", short enough not to
+-- linger over the redrawn menu (Sabrina, 2026-10-13: 1 s looked ugly).
+local DONE_TOAST_S = 0.25
+
 local TOGGLE_ACTIONS = {
     pair = {
         field = "paired",
@@ -131,13 +136,52 @@ local TOGGLE_ACTIONS = {
     },
 }
 
+--- Redraws our submenu. The instance a delayed callback captured may have
+--- moved on since (closed, or the user went into Settings), so it is only
+--- trusted while it still shows our table; otherwise the live one is looked up.
+--- If the user is on another level, the copy waiting in the menu's stack is
+--- replaced instead, so going back shows current data.
 function BluetoothMenu:refreshMenu(touchmenu_instance)
-    touchmenu_instance = touchmenu_instance or self.touchmenu_instance
+    local stack_index
+    if not (touchmenu_instance and touchmenu_instance.item_table
+        and touchmenu_instance.item_table.is_bluetooth_menu) then
+        touchmenu_instance, stack_index = self:findTouchMenu()
+    end
     if not touchmenu_instance then
+        logger.dbg("Bluetooth: no menu to redraw")
+        return
+    end
+    logger.dbg("Bluetooth: redrawing menu, stack index " .. tostring(stack_index))
+    if stack_index then
+        touchmenu_instance.item_table_stack[stack_index] = self:buildMenuTable()
         return
     end
     touchmenu_instance.item_table = self:buildMenuTable()
     touchmenu_instance:updateItems()
+end
+
+--- The TouchMenu holding our submenu, or nil if it is closed. It is not handed
+--- to us on open, and KOReader's window stack holds its container (ReaderMenu
+--- puts the TouchMenu first inside it). The second result is nil when our
+--- table is on screen, or its index in the menu's stack when the user has
+--- gone into Settings or About.
+function BluetoothMenu:findTouchMenu()
+    for i = #UIManager._window_stack, 1, -1 do
+        local container = UIManager._window_stack[i].widget
+        local candidate = container and container[1]
+        if type(candidate) == "table" and candidate.updateItems
+            and type(candidate.item_table) == "table" then
+            if candidate.item_table.is_bluetooth_menu == true then
+                return candidate, nil
+            end
+            for index, level in ipairs(candidate.item_table_stack or {}) do
+                if type(level) == "table" and level.is_bluetooth_menu == true then
+                    return candidate, index
+                end
+            end
+        end
+    end
+    return nil
 end
 
 --- Builds the full Bluetooth submenu item table from current state. Must
@@ -153,6 +197,9 @@ function BluetoothMenu:buildMenuTable()
             text = _("Bluetooth"),
             callback = function(touchmenu_instance)
                 local msg
+                -- The tick may come from the cache; toggle() re-checks, so
+                -- check first or the message and the action disagree.
+                self.controller:status()
                 if self.controller:wantsEnabled() then
                     msg = InfoMessage:new{ text = _("Disabling Bluetooth") }
                 else
@@ -164,12 +211,12 @@ function BluetoothMenu:buildMenuTable()
                     if confirmed and self.controller.is_enabled then
                         UIManager:show(InfoMessage:new{
                             text = _("Bluetooth Enabled"),
-                            timeout = 1,
+                            timeout = DONE_TOAST_S,
                         })
                     elseif not self.controller.is_enabled then
                         UIManager:show(InfoMessage:new{
                             text = _("Bluetooth Disabled"),
-                            timeout = 1,
+                            timeout = DONE_TOAST_S,
                         })
                     else
                         UIManager:show(InfoMessage:new{
@@ -208,12 +255,75 @@ function BluetoothMenu:buildMenuTable()
         })
     end
     self:pairedDevices(menu, self.controller.known_devices)
+    menu.is_bluetooth_menu = true -- lets the poll tell this table from a parent menu
     return menu
 end
 
+-- While the menu is open, how often the radio and the device list are
+-- re-checked. The state can change under it (a headset connecting, another
+-- plugin switching the radio), see the 2026-10-13 session note.
+local MENU_POLL_S = 3
+
 function BluetoothMenu:getTopMenu()
     self:refresh()
+    self:startPolling()
     return self:buildMenuTable()
+end
+
+--- A string that changes when anything the menu draws about the devices does.
+function BluetoothMenu:deviceSignature()
+    local parts = {}
+    for _, dev in ipairs(self.controller.known_devices or {}) do
+        parts[#parts + 1] = table.concat({
+            dev.mac, dev.name or "", tostring(dev.paired), tostring(dev.connected),
+            tostring(dev.starred),
+        }, "|")
+    end
+    return table.concat(parts, ";")
+end
+
+--- Re-checks the radio and the device list every MENU_POLL_S while the menu
+--- is open, and redraws only when something changed. A new open replaces any
+--- poll still running.
+function BluetoothMenu:startPolling()
+    local token = {}
+    self._poll_token = token
+    local seen = false
+    local function tick()
+        if self._poll_token ~= token then
+            return
+        end
+        if not self:findTouchMenu() then
+            -- Closed. Settings and About do not count: back returns to us.
+            -- Never having found it means findTouchMenu's assumptions about
+            -- KOReader's widget layout no longer hold, so say so in the log.
+            if not seen then
+                logger.warn("Bluetooth: menu not found on the first poll, "
+                    .. "KOReader's TouchMenu layout may have changed; polling stopped")
+            end
+            self._poll_token = nil
+            return
+        end
+        seen = true
+        -- The scan screen polls the list itself.
+        if not self._scan_token then
+            self.controller:statusCached(function()
+                UIManager:nextTick(function()
+                    if self._poll_token == token then self:refresh() end
+                end)
+            end)
+            if self.controller.is_enabled then
+                local before = self:deviceSignature()
+                self.controller:knownDevices(function(fresh)
+                    if fresh and self._poll_token == token and self:deviceSignature() ~= before then
+                        self:refreshMenu()
+                    end
+                end)
+            end
+        end
+        UIManager:scheduleIn(MENU_POLL_S, tick)
+    end
+    UIManager:scheduleIn(MENU_POLL_S, tick)
 end
 
 function BluetoothMenu:refresh(touchmenu_instance)
@@ -223,17 +333,31 @@ function BluetoothMenu:refresh(touchmenu_instance)
     end
 
     self._refreshing = true
-
-    self.controller:status()
-    -- Shows the cached list now; the background read redraws when it lands.
-    self.controller:knownDevices(function(fresh)
-        if fresh then
+    -- pcall: a throw here must not leave the flag set, or every later
+    -- refresh would be skipped until KOReader restarts.
+    local ok, err = pcall(function()
+        -- Both the radio state and the list come from the cache first and
+        -- redraw when the background reads land; a changed radio re-reads.
+        self.controller:statusCached(function()
+            UIManager:nextTick(function() self:refresh(touchmenu_instance) end)
+        end)
+        -- Shows the cached list now; the background read redraws when it lands.
+        -- With the radio off the callback runs at once and has drawn already.
+        local drew = false
+        self.controller:knownDevices(function(fresh)
+            if fresh then
+                drew = true
+                self:refreshMenu(touchmenu_instance)
+            end
+        end)
+        if not drew then
             self:refreshMenu(touchmenu_instance)
         end
     end)
-    self:refreshMenu(touchmenu_instance)
-
     self._refreshing = false
+    if not ok then
+        logger.warn("Bluetooth: menu refresh failed: " .. tostring(err))
+    end
 end
 
 --- Runs one of TOGGLE_ACTIONS against dev: shows a "Verb-ing…" toast,
@@ -253,10 +377,14 @@ function BluetoothMenu:performToggle(dev, action, touchmenu_instance)
 
     dev[action.method](dev, function(confirmed)
         UIManager:close(msg)
+        -- The toast reads dev, not a fresh lookup: pollField confirmed the
+        -- result on this object, while a poll mid-action can install a newer
+        -- one read before the action finished (it said "Disconnected" after a
+        -- good connect from off, 2026-10-13 reader log).
         if confirmed then
             UIManager:show(InfoMessage:new{
                 text = (dev[action.field] and action.active_done_text or action.inactive_done_text) .. dev.name,
-                timeout = 1,
+                timeout = DONE_TOAST_S,
             })
         else
             UIManager:show(InfoMessage:new{
@@ -396,7 +524,10 @@ function BluetoothMenu:showSearchResults(on_refresh)
     local poll_interval = 1
 
     self.controller:search(on_refresh, scan_duration)
-    self.search_menu_closed = false
+    -- Per-scan token: a late poll from an earlier scan sees a different token
+    -- and stops, instead of reviving next to the new one (as startPolling does).
+    local token = {}
+    self._scan_token = token
 
     self.search_menu = Menu:new{
         title = _("Searching for devices…"),
@@ -405,7 +536,7 @@ function BluetoothMenu:showSearchResults(on_refresh)
             self:pairFoundDevice(item.dev, on_refresh)
         end,
         close_callback = function()
-            self.search_menu_closed = true
+            if self._scan_token == token then self._scan_token = nil end
             UIManager:close(self.search_menu)
         end,
     }
@@ -420,13 +551,13 @@ function BluetoothMenu:showSearchResults(on_refresh)
         known_before[dev.mac] = true
     end
     local function poll()
-        if self.search_menu_closed then
+        if self._scan_token ~= token then
             return
         end
         -- The read runs in the background; the next poll is scheduled once
         -- its result is in, so slow reads never stack up.
         self.controller:knownDevices(function()
-            if self.search_menu_closed then
+            if self._scan_token ~= token then
                 return
             end
             local done = os.time() >= deadline

@@ -275,5 +275,51 @@ do
     fake.readSnapshot = nil
 end
 
+-- Cached status: display code gets the last value at once; the background
+-- check only changes it when nothing newer has happened.
+do
+    local c = build(true)
+    c:status()
+    local finish
+    fake.readStatus = function(_, done) finish = done end
+    local changes = {}
+    local function on_change(v) table.insert(changes, v) end
+
+    check(c:statusCached(on_change) == true, "cached status: last value returned at once")
+    c:statusCached(on_change)
+    finish(true)
+    check(#changes == 0 and c.is_enabled == true, "cached status: same value is no change")
+
+    c:statusCached(on_change)
+    finish(false)
+    check(c.is_enabled == false and changes[1] == false, "cached status: change applied and reported")
+
+    c:statusCached(on_change)
+    finish(nil)
+    check(c.is_enabled == false and #changes == 1, "cached status: no answer keeps the old value")
+
+    c:statusCached(on_change)
+    c:status() -- a blocking check ran meanwhile and is newer
+    local after = c.is_enabled
+    finish(not after)
+    check(c.is_enabled == after, "cached status: stale result dropped after a blocking check")
+
+    c:statusCached(on_change)
+    c._poll_generation = (c._poll_generation or 0) + 1
+    finish(not c.is_enabled)
+    check(c.is_enabled == after, "cached status: result dropped after enable/disable")
+
+    -- A check started by a caller with no callback still tells later callers
+    c:statusCached()
+    local late = {}
+    c:statusCached(function(v) table.insert(late, v) end)
+    finish(not c.is_enabled)
+    check(#late == 1, "cached status: a later caller's callback is kept when a check is already running")
+
+    fake.readStatus = nil
+    local c2 = build(false)
+    check(c2:statusCached() == false, "cached status: backend without a background check falls back")
+end
+
 if failures > 0 then os.exit(1) end
 print("controller_test: ok")
