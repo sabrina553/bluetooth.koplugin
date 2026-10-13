@@ -260,8 +260,10 @@ function bluez.runAsync(script, done)
     f:write(script)
     f:close()
     -- Written to .part and renamed, so a half-written file is never read.
-    os.execute(("( timeout -k 1 %d sh %s > %s.part 2>&1; mv %s.part %s ) >/dev/null 2>&1 &")
-        :format(SNAPSHOT_TIMEOUT_S, script_path, out_path, out_path, out_path))
+    -- If the script file is gone afterwards, the poll gave up (its cleanup
+    -- removes it), so the late output is deleted instead of leaking in /tmp.
+    os.execute(("( timeout -k 1 %d sh %s > %s.part 2>&1; mv %s.part %s; [ -e %s ] || rm -f %s ) >/dev/null 2>&1 &")
+        :format(SNAPSHOT_TIMEOUT_S, script_path, out_path, out_path, out_path, script_path, out_path))
 
     local deadline = os.time() + SNAPSHOT_TIMEOUT_S + 5
     local function cleanup()
