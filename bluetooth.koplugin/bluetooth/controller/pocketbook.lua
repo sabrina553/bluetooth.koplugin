@@ -24,7 +24,8 @@ end
 
 function pocketbook:status()
     logger.dbg("Pocketbook-Netagent: Checking Bluetooth status..")
-    local handle = io.popen('netagent bt status')
+    -- stderr dropped: netagent logs every call there, which floods the log.
+    local handle = io.popen('netagent bt status 2>/dev/null')
     local output = handle:read("*a")
     handle:close()
 
@@ -38,12 +39,12 @@ end
 
 function pocketbook:enable()
     logger.dbg("Pocketbook-Netagent: Enabling Bluetooth...")
-    os.execute('netagent bt on &')
+    os.execute('netagent bt on >/dev/null 2>&1 &')
 end
 
 function pocketbook:disable()
     logger.dbg("Pocketbook-Netagent: Disabling Bluetooth...")
-    os.execute('netagent bt off &')
+    os.execute('netagent bt off >/dev/null 2>&1 &')
 end
 
 function pocketbook:pair(mac)
@@ -83,12 +84,8 @@ function pocketbook:knownDevices()
     return Bluez:knownDevices()
 end
 
-function pocketbook:scan()
-    return Bluez:scan()
-end
-
-function pocketbook:search()
-    return Bluez:search()
+function pocketbook:search(duration)
+    return Bluez:search(duration)
 end
 
 function pocketbook:info(mac)

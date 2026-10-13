@@ -4,8 +4,16 @@ local UIManager = require("ui/uimanager")
 local InfoMessage = require("ui/widget/infomessage")
 local _ = require("gettext")
 
+local BackendSelect = require("bluetooth/controller/backend_select")
 local PocketBook = require("bluetooth/controller/pocketbook")
 local Bluez = require("bluetooth/controller/bluez")
+local Parse = require("bluetooth/controller/bluetoothctl_parse")
+
+-- Sub-second clock for timing logs; os.time is only whole seconds.
+local socket_ok, socket = pcall(require, "socket")
+local function now()
+    return socket_ok and socket.gettime() or os.time()
+end
 
 ---@class controller
 ---@field type string
@@ -47,30 +55,26 @@ function controller:init()
         self.backend.controller = self
     end
 
+    -- Only read devices when the radio is already on: on PocketBook a read
+    -- powers the radio on and off again, which flickered it on every view
+    -- change. The menu refreshes when it is opened.
     self:status()
-    self:knownDevices()
+    if self.is_enabled then
+        self:knownDevices()
+    end
 
-    logger:dbg("Bluetooth.koplugin.Controller Initialized")
+    logger.dbg("Bluetooth.koplugin.Controller Initialized")
 end
 
 function controller:Devicetype()
-    if Device:isAndroid() then
-        self.type = "Android"
-    elseif Device:isPocketBook() then
-        self.type = "PocketBook"
-    elseif Device:isEmulator() or Device:isDesktop() then
-        self.type = "Bluez"
-    elseif Device:isKindle() then
-        self.type = "Kindle"
-    elseif Device:isKobo() then
-        self.type = "Kobo"
-    end
+    self.type = BackendSelect.select(Device)
 end
 
 function controller:callDeviceFunction(action, variable)
     if self.backend and self.backend[action] then
         return self.backend[action](self.backend, variable)
     else
+        logger.warn("Bluetooth: backend has no action", tostring(action))
         UIManager:show(InfoMessage:new { text = _("Unsupported Bluetooth action on this device"), timeout = 2, })
     end
 end
@@ -79,7 +83,7 @@ end
 ---@param mac string
 ---@return Devices|nil
 function controller:getDevice(mac)
-    logger.dbg("Looking up known device by MAC: " .. mac)
+    logger.dbg("Looking up known device by MAC: " .. Parse.maskMac(mac))
     if not self.known_devices then
         return nil
     end
@@ -128,16 +132,25 @@ function controller:getStarredDevices()
     return starred
 end
 
---- Call right before bluetooth gets torn down for suspend/pause. Refreshes
---- device state one last time (so `connected` reflects reality) and snapshots
---- it to disk — bluetoothctl won't remember "was connected right before
---- suspend" once the radio's been power-cycled, so this is our only record.
---- Takes a callback because knownDevices() can be async (e.g. on PocketBook,
---- which needs to confirm the radio is on before it can query device info);
---- persisting before that finishes would risk writing stale `connected`
---- values.
+--- Call right before bluetooth gets torn down for suspend. Records whether
+--- the radio was on (so resume only restores a radio that was on), and, if
+--- it was, refreshes device state one last time and snapshots it to disk -
+--- bluetoothctl won't remember "was connected right before suspend" once
+--- the radio's been power-cycled, so this is our only record.
+--- With the radio off there is nothing to snapshot, and reading devices
+--- would power it on (PocketBook), so it is skipped.
+--- Takes a callback because knownDevices() can be async; persisting before
+--- that finishes would risk writing stale `connected` values.
 ---@param callback fun()|nil
 function controller:snapshotBeforeSuspend(callback)
+    self:status()
+    self.was_enabled_before_suspend = self.is_enabled
+    if not self.is_enabled then
+        logger.dbg("Bluetooth: radio is off at suspend, nothing to snapshot")
+        if callback then callback() end
+        return
+    end
+
     self:knownDevices(function()
         self:persistDeviceState()
         if callback then callback() end
@@ -169,10 +182,10 @@ function controller:reconnectOnWake()
     for mac in pairs(wanted_macs) do
         local dev = self:getDevice(mac)
         if dev then
-            logger.dbg("Bluetooth: reconnecting to " .. mac .. " on wake")
+            logger.dbg("Bluetooth: reconnecting to " .. Parse.maskMac(mac) .. " on wake")
             dev:connect()
         else
-            logger.warn("Bluetooth: stored device " .. mac .. " not found among known_devices, skipping wake reconnect")
+            logger.warn("Bluetooth: stored device " .. Parse.maskMac(mac) .. " not found among known_devices, skipping wake reconnect")
         end
     end
 end
@@ -315,11 +328,41 @@ function controller:knownDevices(callback, opts)
     opts = opts or {}
 
     local function refresh()
+        local started = now()
+        local previous = {}
+        for _, dev in ipairs(self.known_devices or {}) do
+            previous[dev.mac] = dev
+        end
+
         self.known_devices = self:callDeviceFunction("knownDevices") or {}
 
+        local queried = 0
         for _, dev in ipairs(self.known_devices) do
-            dev:refresh()
+            -- Backends mark devices whose state they already know (unpaired
+            -- scan results) so we don't spawn a process for each one.
+            if not dev.skip_info then
+                dev:refresh()
+                queried = queried + 1
+            end
         end
+
+        -- Devices are rebuilt on every refresh, so changes show up as a
+        -- difference from the previous list. This is what shows a device
+        -- reconnecting by itself, see the 2026-10-13 session note.
+        for _, dev in ipairs(self.known_devices) do
+            local before = previous[dev.mac]
+            if before then
+                for _, field in ipairs({ "connected", "paired", "trusted", "blocked" }) do
+                    if before[field] ~= dev[field] then
+                        logger.info("Bluetooth: " .. field .. " of " .. Parse.maskMac(dev.mac) ..
+                            " changed " .. tostring(before[field]) .. " -> " .. tostring(dev[field]))
+                    end
+                end
+            end
+        end
+
+        logger.dbg(string.format("Bluetooth: refreshed %d devices (%d queried) in %.2fs",
+            #self.known_devices, queried, now() - started))
 
         self:applyStoredDeviceState()
         return self.known_devices
@@ -383,7 +426,7 @@ end
 
 ---@param mac string
 function controller:info(mac)
-    logger.dbg("Fetching info for device with MAC: " .. tostring(mac))
+    logger.dbg("Fetching info for device with MAC: " .. Parse.maskMac(mac))
     return self:callDeviceFunction("info", mac)
 end
 

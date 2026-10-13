@@ -211,7 +211,7 @@ end
 
 function BluetoothMenu:refresh(touchmenu_instance)
     if self._refreshing then
-        logger:dbg("Bluetooth: refresh() re-entered while already running, skipping")
+        logger.dbg("Bluetooth: refresh() re-entered while already running, skipping")
         return
     end
 
@@ -282,28 +282,6 @@ end
 
 function BluetoothMenu:getSettingsMenu()
      return {
-        {
-            text = _("Enable on Wake"),
-            checked_func = function()
-                return self.settings:getEnableOnWake()
-            end,
-            callback = function()
-                self.settings:toggleEnableOnWake()
-                UIManager:broadcastEvent(Event:new("BluetoothSettingsChanged"))
-            end,
-            keep_menu_open = true,
-        },
-        {
-            text = _("Disable on lock"),
-            checked_func = function()
-                return self.settings:getDisableOnLock()
-            end,
-            callback = function()
-                self.settings:toggleDisableOnLock() -- toggles :? 
-                UIManager:broadcastEvent(Event:new("BluetoothSettingsChanged"))
-            end,
-            keep_menu_open = true,
-        },
         {
             text = _("Disable on Suspend"),
             checked_func = function()
@@ -395,11 +373,10 @@ function BluetoothMenu:setUpdateChannel(channel, touchmenu_instance)
     self.settings:setUpdateChannel(channel)
     UIManager:broadcastEvent(Event:new("BluetoothSettingsChanged"))
 
-    local close_message = self:toast(_("Checking for updates…"), 0)
-    self.updater:fetchLatestVersion()
-    pcall(close_message)
+    self:checkForUpdates()
 
-    self:refresh(touchmenu_instance)
+    -- Only redraw the current list; refresh() would swap in the top-level menu.
+    touchmenu_instance:updateItems()
 end
 
 function BluetoothMenu:showSearchResults(on_refresh)
@@ -422,17 +399,38 @@ function BluetoothMenu:showSearchResults(on_refresh)
     }
     UIManager:show(self.search_menu)
 
-    local elapsed = 0
+    -- Wall-clock deadline: counting polls let slow refreshes stretch a
+    -- 15 s scan to almost a minute, see the on-device log from 2026-10-13.
+    local started = os.time()
+    local deadline = started + scan_duration
+    local known_before = {}
+    for _, dev in ipairs(self.controller.known_devices or {}) do
+        known_before[dev.mac] = true
+    end
     local function poll()
         if self.search_menu_closed then
             return
         end
-        elapsed = elapsed + poll_interval
         self.controller:knownDevices() -- re-shells bluetoothctl devices + refreshes each dev
-        local done = elapsed >= scan_duration
-        self.search_menu:switchItemTable(
+        local done = os.time() >= deadline
+        if done then
+            local found, new = 0, 0
+            for _, dev in ipairs(self.controller.known_devices or {}) do
+                found = found + 1
+                if not known_before[dev.mac] then new = new + 1 end
+            end
+            logger.info(string.format("Bluetooth: scan finished after %ds, %d devices known, %d new",
+                os.time() - started, found, new))
+        end
+        -- Without an item number switchItemTable jumps back to page 1, which
+        -- made later pages unreachable while scanning. Passing the first item
+        -- of the current page keeps it (KOReader clamps it if the list shrinks).
+        local menu = self.search_menu
+        local first_on_page = ((menu.page or 1) - 1) * (menu.perpage or 1) + 1
+        menu:switchItemTable(
             done and _("Search complete") or _("Searching for devices…"),
-            buildItemTable(self.controller.known_devices)
+            buildItemTable(self.controller.known_devices),
+            first_on_page
         )
         if not done then
             UIManager:scheduleIn(poll_interval, poll)
@@ -593,10 +591,11 @@ end
 
 function BluetoothMenu:showPluginUpdateCheck(skip_version_check)
     if not skip_version_check then
-        -- Refresh the latest version on open.
-        local close_message = self:toast(_("Checking for Updates"), 0)
-        self.updater:fetchLatestVersion()
-        pcall(close_message)
+        -- Refresh the latest version on open. A failed check must not be
+        -- reported as "up to date".
+        if not self:checkForUpdates() then
+            return
+        end
     end
 
     local dialog
@@ -628,9 +627,8 @@ function BluetoothMenu:showPluginUpdateCheck(skip_version_check)
                 {
                     text = _("Check for Updates"),
                     callback = function()
-                        self.updater:fetchLatestVersion()
                         UIManager:close(dialog)
-                        self:showPluginUpdateCheck(true)
+                        self:showPluginUpdateCheck()
                     end,
                 },
             },
@@ -648,6 +646,20 @@ function BluetoothMenu:showPluginUpdateCheck(skip_version_check)
     UIManager:show(dialog)
 end
 
+--- Asks GitHub for the latest release on the selected channel, with a
+--- toast while it blocks. On failure shows why and returns false.
+---@return boolean ok
+function BluetoothMenu:checkForUpdates()
+    local close_message = self:toast(_("Checking for updates…"), 0)
+    local ok, err = self.updater:fetchLatestVersion()
+    pcall(close_message)
+
+    if not ok then
+        self:toast(T(_("Could not check for updates: %1"), tostring(err)), 3)
+    end
+    return ok
+end
+
 --- Actually performs the update: downloads the release asset, verifies it,
 --- and extracts it into place, using self.updater:update()'s progress
 --- callback to keep a single persistent toast up to date. This was
@@ -659,7 +671,7 @@ function BluetoothMenu:showPluginUpdater()
 
     self.updater:update(function(stage, percent, message)
         if stage == "download" then
-            self:toast(T(_("Downloading update… %1%%"), percent or 0), 0)
+            self:toast(T(_("Downloading update… %1%"), percent or 0), 0)
         elseif stage == "complete" then
             if self.info_message then
                 UIManager:close(self.info_message)
@@ -669,7 +681,7 @@ function BluetoothMenu:showPluginUpdater()
         elseif stage == "failed" then
             self:toast(T(_("Update failed: %1"), tostring(message or _("unknown error"))), 3)
         else
-            logger:warn("Bluetooth: unexpected update progress stage", tostring(stage))
+            logger.warn("Bluetooth: unexpected update progress stage", tostring(stage))
         end
     end)
 end
@@ -691,6 +703,8 @@ function BluetoothMenu:toast(text, timeout)
     })
 
     UIManager:show(info_message)
+    -- Callers go on to block (network, downloads), so paint it now or it never shows.
+    UIManager:forceRePaint()
     self.info_message = info_message
 
     return function() UIManager:close(info_message) end

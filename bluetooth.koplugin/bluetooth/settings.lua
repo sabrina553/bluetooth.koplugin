@@ -4,17 +4,13 @@ local logger = require("logger")
 local Version = require("bluetooth/ota/version")
 
 ---@class BluetoothSettingsData
----@field disable_on_lock boolean
 ---@field disable_on_suspend boolean
----@field enable_on_wake boolean
 ---@field starred_on_wake boolean
 ---@field last_on_wake boolean
 ---@field update_channel string "stable" | "beta" | "development"
 
 local DEFAULTS = {
-    disable_on_lock = false,
     disable_on_suspend = false,
-    enable_on_wake = false,
     starred_on_wake = false,
     last_on_wake = false,
     update_channel = "stable",
@@ -57,7 +53,7 @@ function BluetoothSettings:init()
     if success then
         self.data = result
     else
-        logger:err("Bluetooth Settings: Error reading settings, using defaults", result)
+        logger.err("Bluetooth Settings: Error reading settings, using defaults", result)
         self.data = shallowCopy(DEFAULTS)
         self:write()
     end
@@ -66,37 +62,23 @@ end
 function BluetoothSettings:write()
     local success, error_msg = pcall(function()
         if not self.settings then
-            logger:err("Bluetooth Settings: No settings object available for write")
+            logger.err("Bluetooth Settings: No settings object available for write")
             return false
         end
 
-        logger:dbg("Bluetooth: Saving settings data", self.data)
+        logger.dbg("Bluetooth: Saving settings data", self.data)
         self.settings:saveSetting(SETTING_KEY, self.data)
         self.settings:flush()
-        logger:dbg("Settings saved and flushed successfully")
+        logger.dbg("Settings saved and flushed successfully")
         return true
     end)
 
     if not success then
-        logger:err("error writing settings:", error_msg)
+        logger.err("error writing settings:", error_msg)
         return false
     end
 
     return true
-end
-
-function BluetoothSettings:getDisableOnLock()
-    return self.data.disable_on_lock or DEFAULTS.disable_on_lock
-end
-
-function BluetoothSettings:setDisableOnLock(disable_on_lock)
-    self.data.disable_on_lock = disable_on_lock
-    self:write()
-end
-
-function BluetoothSettings:toggleDisableOnLock()
-    self.data.disable_on_lock = not self:getDisableOnLock()
-    self:write()
 end
 
 function BluetoothSettings:getDisableOnSuspend()
@@ -110,20 +92,6 @@ end
 
 function BluetoothSettings:toggleDisableOnSuspend()
     self.data.disable_on_suspend = not self:getDisableOnSuspend()
-    self:write()
-end
-
-function BluetoothSettings:getEnableOnWake()
-    return self.data.enable_on_wake or DEFAULTS.enable_on_wake
-end
-
-function BluetoothSettings:setEnableOnWake(enable_on_wake)
-    self.data.enable_on_wake = enable_on_wake
-    self:write()
-end
-
-function BluetoothSettings:toggleEnableOnWake()
-    self.data.enable_on_wake = not self:getEnableOnWake()
     self:write()
 end
 
@@ -169,7 +137,7 @@ end
 ---@param channel string "stable" | "beta" | "development"
 function BluetoothSettings:setUpdateChannel(channel)
     if not Version.isChannel(channel) then
-        logger:warn("Bluetooth Settings: ignoring unknown update channel", tostring(channel))
+        logger.warn("Bluetooth Settings: ignoring unknown update channel", tostring(channel))
         return
     end
     self.data.update_channel = channel

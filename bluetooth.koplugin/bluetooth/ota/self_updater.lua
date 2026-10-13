@@ -1,5 +1,6 @@
 local g = require("gettext")
-local T = require("ffi/util").template
+local ffiUtil = require("ffi/util")
+local T = ffiUtil.template
 
 local Archiver = require("ffi/archiver")
 local DataStorage = require("datastorage")
@@ -8,19 +9,21 @@ local util = require("util")
 local sha2 = require("ffi/sha2")
 
 local PluginMetadata = require("bluetooth/plugin_metadata")
+local PluginPath = require("bluetooth/plugin_path")
+local SafePath = require("bluetooth/ota/safe_path")
 local Version = require("bluetooth/ota/version")
 local logger = require("logger")
 
 local function verifyDigest(path, digest)
     if type(digest) ~= "string" then
-        logger:err("No digest provided for asset, cannot verify")
+        logger.err("No digest provided for asset, cannot verify")
         return false
     end
 
     local digest_type, expected_digest_hex = digest:match("(%w+):(%x+)")
 
     if digest_type ~= "sha256" then
-        logger:err("Unknown digest type", digest_type)
+        logger.err("Unknown digest type", digest_type)
         return false
     end
 
@@ -39,32 +42,11 @@ local function verifyDigest(path, digest)
     local actual_digest_hex = sha2.sha256(content)
 
     if expected_digest_hex:lower() ~= actual_digest_hex:lower() then
-        logger:err("Digest mismatch:", expected_digest_hex, "!=", actual_digest_hex)
+        logger.err("Digest mismatch:", expected_digest_hex, "!=", actual_digest_hex)
         return false
     end
 
     return true
-end
-
---- Walks up from this file's own location until it finds a directory
---- ending in `.koplugin`. This has to walk up (rather than just checking
---- the immediate parent) because self_updater.lua may be nested arbitrarily
---- deep inside the plugin (e.g. under `ota/`), and checking only one level
---- silently falls through to the hardcoded fallback path below, which can
---- point at the wrong install location entirely.
-local function getPluginPath()
-    local source = debug.getinfo(1, "S").source
-    local path = source:match("@(.*)")
-    local dir = path and path:match("(.*)/")
-
-    while dir and dir ~= "" do
-        if dir:match("%.koplugin$") then
-            return dir
-        end
-        dir = dir:match("(.*)/")
-    end
-
-    return DataStorage:getDataDir() .. "/plugins/bluetooth.koplugin"
 end
 
 --- Locates the plugin's root directory inside the downloaded archive by
@@ -100,8 +82,8 @@ end
 ---@field latest_known_version string | nil
 ---@field is_pending_restart boolean
 local BluetoothSelfUpdater = {
-    plugin_path = getPluginPath(),
-    release_asset_name = "%a+.koplugin.zip",
+    plugin_path = PluginPath.get() or (DataStorage:getDataDir() .. "/plugins/bluetooth.koplugin"),
+    release_asset_name = "^bluetooth%.koplugin%.zip$",
     release_cache_path = DataStorage:getDataDir() .. "/cache/bluetooth"
 }
 
@@ -140,59 +122,41 @@ function BluetoothSelfUpdater:getUpdateChannel()
     return self.settings:getUpdateChannel()
 end
 
---- Highest release version the channel accepts. Chosen by version, not by
---- GitHub's list order, so publishing an older hotfix after a newer
---- pre-release can't make it look like the latest.
----@param releases table[]
----@param channel string
----@return string|nil
-local function pickLatestForChannel(releases, channel)
-    local latest = nil
-    for _, release in ipairs(releases) do
-        local version = release.tag_name
-        -- A release marked pre-release on GitHub never reaches stable,
-        -- whatever its tag says.
-        local allowed = Version.channelAccepts(channel, version)
-            and not (channel == "stable" and release.prerelease)
-        if allowed and (latest == nil or Version.isNewer(latest, version)) then
-            latest = version
-        end
-    end
-    return latest
-end
-
+---@return boolean ok false when the check itself failed (offline, rate-limited...)
+---@return string|nil err
 function BluetoothSelfUpdater:fetchLatestVersion()
     if not PluginMetadata.hasRepository() then
-        logger:warn("Unknown repository - cannot fetch latest version")
-        return
+        logger.warn("Unknown repository - cannot fetch latest version")
+        return false, g("No repository defined")
     end
 
     local channel = self:getUpdateChannel()
 
     local ok, releases = self.github_api:getReleases(PluginMetadata.getRepository())
     if not ok or not releases then
-        return
+        return false, g("Could not reach GitHub")
     end
 
     -- nil when the channel has no release yet; don't keep a version cached
     -- from the previously selected channel.
-    local version = pickLatestForChannel(releases, channel)
+    local version = Version.pickLatest(releases, channel, self.release_asset_name)
 
     self.latest_known_version = version
     -- Tracked so a caller (e.g. the menu) can tell whether the cached
     -- latest_known_version was actually fetched for the channel currently
     -- selected in settings, in case those ever drift apart.
     self.latest_known_channel = channel
+    return true
 end
 
 function BluetoothSelfUpdater:downloadLatestRelease(progress_callback)
     if not self.latest_known_version then
-        logger:err("Latest release is not defined")
+        logger.err("Latest release is not defined")
         return false, g("No latest release")
     end
 
     if not PluginMetadata.hasRepository() then
-        logger:warn("Unknown repository - cannot fetch latest version")
+        logger.warn("Unknown repository - cannot fetch latest version")
         return false, g("No repository defined")
     end
 
@@ -207,6 +171,7 @@ function BluetoothSelfUpdater:downloadLatestRelease(progress_callback)
         return false, directory_error_message
     end
 
+    local last_percent = -1
     local ok, result, asset = self.github_api:downloadReleaseArchive(
         PluginMetadata.getRepository(),
         self.latest_known_version,
@@ -214,16 +179,19 @@ function BluetoothSelfUpdater:downloadLatestRelease(progress_callback)
         download_path,
         function(bytes_downloaded, bytes_total)
             if progress_callback then
-                progress_callback(
-                    "download",
-                    math.floor(100 * bytes_downloaded / bytes_total)
-                )
+                -- Every report repaints the screen, which is slow on e-ink,
+                -- so report in 10% steps.
+                local percent = math.floor(100 * bytes_downloaded / bytes_total / 10) * 10
+                if percent ~= last_percent then
+                    last_percent = percent
+                    progress_callback("download", percent)
+                end
             end
         end
     )
 
     if not ok then
-        logger:err("Failed to download release", result)
+        logger.err("Failed to download release", result)
         return false, result
     end
 
@@ -235,7 +203,10 @@ function BluetoothSelfUpdater:downloadLatestRelease(progress_callback)
     return true, download_path
 end
 
---- Extracts the plugin's files from the downloaded archive into target_path.
+--- Extracts the plugin's files from the downloaded archive into a staging
+--- directory beside target_path, then swaps it into place. A failure part way
+--- through leaves the installed plugin untouched, and files the new version
+--- no longer ships disappear with the old directory.
 ---
 --- Uses two separate passes over the archive: one to locate the plugin root
 --- (findPluginInArchive) and one to actually extract entries. Since the
@@ -243,16 +214,13 @@ end
 --- between passes rather than assuming a second :iterate() call picks up
 --- where the first left off (or works at all).
 function BluetoothSelfUpdater:extractPlugin(source_path, target_path)
+    -- Neither name ends in ".koplugin", so KOReader's plugin loader ignores them.
+    local staging_path = target_path .. ".new"
+    local backup_path = target_path .. ".bak"
+
     local reader = Archiver.Reader:new()
     if not reader:open(source_path) then
         return false, g("Failed to open downloaded archive.")
-    end
-
-    local directory_exists, directory_error_message = util.makePath(target_path)
-    if not directory_exists then
-        reader:close()
-
-        return false, directory_error_message
     end
 
     local plugin_root = findPluginInArchive(reader, PluginMetadata.getRepository())
@@ -263,15 +231,21 @@ function BluetoothSelfUpdater:extractPlugin(source_path, target_path)
         return false, g("Could not locate plugin root (_meta.lua) in archive.")
     end
 
+    ffiUtil.purgeDir(staging_path) -- leftovers from an earlier failed attempt
+    local directory_exists, directory_error_message = util.makePath(staging_path)
+    if not directory_exists then
+        return false, directory_error_message
+    end
+
     reader = Archiver.Reader:new()
     if not reader:open(source_path) then
+        ffiUtil.purgeDir(staging_path)
         return false, g("Failed to re-open downloaded archive.")
     end
 
     -- plugin_root comes from util.splitFilePathName, which already ends in "/"
     -- (https://github.com/koreader/koreader/blob/master/frontend/util.lua).
-    -- Appending another one matched nothing, so updates "succeeded" with zero
-    -- files. The trailing slash keeps this a path-segment match, so a sibling
+    -- The trailing slash keeps this a path-segment match, so a sibling
     -- such as "bluetooth.koplugin-legacy/" isn't extracted too.
     local prefix = plugin_root
     local extracted_count = 0
@@ -280,7 +254,13 @@ function BluetoothSelfUpdater:extractPlugin(source_path, target_path)
         if entry.mode == "file" and entry.path:sub(1, #prefix) == prefix then
             local entry_path = entry.path:sub(#prefix + 1)
 
-            local extract_path = target_path .. "/" .. entry_path
+            if not SafePath.isSafeRelative(entry_path) then
+                reader:close()
+                ffiUtil.purgeDir(staging_path)
+                return false, T(g("Unsafe path in archive: %1"), entry.path)
+            end
+
+            local extract_path = staging_path .. "/" .. entry_path
 
             local parent, _ = util.splitFilePathName(extract_path)
             if parent and parent ~= "" then
@@ -291,6 +271,7 @@ function BluetoothSelfUpdater:extractPlugin(source_path, target_path)
 
             if not ok then
                 reader:close()
+                ffiUtil.purgeDir(staging_path)
                 return false, T(g("Failed to extract file: %1"), entry.path)
             end
             extracted_count = extracted_count + 1
@@ -301,14 +282,29 @@ function BluetoothSelfUpdater:extractPlugin(source_path, target_path)
 
     -- Never report success for an update that installed nothing.
     if extracted_count == 0 then
+        ffiUtil.purgeDir(staging_path)
         return false, g("No plugin files found in archive.")
     end
+
+    -- Swap. Renames within one directory are atomic, so the only window with
+    -- no plugin in place is between the two renames.
+    ffiUtil.purgeDir(backup_path)
+    if not os.rename(target_path, backup_path) then
+        ffiUtil.purgeDir(staging_path)
+        return false, g("Could not move the installed plugin aside.")
+    end
+    if not os.rename(staging_path, target_path) then
+        os.rename(backup_path, target_path) -- put the old version back
+        ffiUtil.purgeDir(staging_path)
+        return false, g("Could not move the new plugin into place.")
+    end
+    ffiUtil.purgeDir(backup_path)
 
     return true, nil
 end
 
 function BluetoothSelfUpdater:update(progress_callback)
-    NetworkManager:goOnlineToRun(function()
+    local ran = NetworkManager:goOnlineToRun(function()
         local download_ok, download_path = self:downloadLatestRelease(progress_callback)
 
         if not download_ok then
@@ -323,7 +319,7 @@ function BluetoothSelfUpdater:update(progress_callback)
         util.removeFile(download_path)
 
         if not extract_ok then
-            logger:err("Extraction failed:", extract_message)
+            logger.err("Extraction failed:", extract_message)
             if progress_callback then
                 progress_callback("failed", 100, extract_message)
             end
@@ -336,6 +332,12 @@ function BluetoothSelfUpdater:update(progress_callback)
             progress_callback("complete", 100, nil)
         end
     end)
+
+    -- false means the callback never ran: offline, and Wi-Fi isn't set to
+    -- turn on automatically (or the user cancelled).
+    if ran == false and progress_callback then
+        progress_callback("failed", 100, g("No network connection. Turn on Wi-Fi and try again."))
+    end
 end
 
 return BluetoothSelfUpdater

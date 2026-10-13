@@ -53,6 +53,32 @@ check("development takes dev", Version.channelAccepts("development", "0.0.4-dev.
 check("development takes legacy dev", Version.channelAccepts("development", "0.0.3.dev.3"), true)
 check("unknown channel", Version.channelAccepts("nightly", "0.0.4"), false)
 
+-- Picking the release a channel should offer
+local ZIP = "^bluetooth%.koplugin%.zip$"
+local function release(tag, opts)
+    opts = opts or {}
+    local assets = { { name = "bluetooth.koplugin.zip" } }
+    if opts.no_asset then assets = {} end
+    if opts.checksum_only then assets = { { name = "bluetooth.koplugin.zip.sha256" } } end
+    return { tag_name = tag, prerelease = opts.prerelease, assets = assets }
+end
+local function pick(description, releases, channel, expected)
+    check(description, Version.pickLatest(releases, channel, ZIP), expected)
+end
+
+pick("highest wins regardless of list order",
+    { release("0.0.3"), release("0.0.4"), release("0.0.2") }, "stable", "0.0.4")
+pick("stable skips pre-release tags",
+    { release("0.0.5-beta.1", { prerelease = true }), release("0.0.4") }, "stable", "0.0.4")
+pick("stable skips GitHub pre-release flag",
+    { release("0.0.5", { prerelease = true }), release("0.0.4") }, "stable", "0.0.4")
+pick("beta takes newer beta", { release("0.0.5-beta.1"), release("0.0.4") }, "beta", "0.0.5-beta.1")
+pick("release without the zip is skipped",
+    { release("0.0.5", { no_asset = true }), release("0.0.4") }, "stable", "0.0.4")
+pick("checksum file alone is not the zip",
+    { release("0.0.5", { checksum_only = true }), release("0.0.4") }, "stable", "0.0.4")
+pick("nothing suitable", { release("0.0.5-dev.1") }, "stable", nil)
+
 if failures > 0 then
     print(failures .. " failure(s)")
     os.exit(1)
