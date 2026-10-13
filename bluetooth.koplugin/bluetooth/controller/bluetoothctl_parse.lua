@@ -38,9 +38,23 @@ function Parse.info(output)
         return output:match(key .. ": (%w+)") == "yes"
     end
 
+    -- Fields sit on indented lines after the "Device ..." header. Alias is
+    -- what `bluetoothctl devices` (and so the menu) shows; Name is the fallback.
+    local function text(key)
+        return output:match("\n%s*" .. key .. ": ([^\r\n]+)")
+    end
+
+    local mac = output:match("Device (%w+:%w+:%w+:%w+:%w+:%w+)")
+    local name = text("Alias") or text("Name")
+    -- An unnamed device's alias is its MAC with dashes; leave it unset, as
+    -- deviceLine() does, so the menu keeps showing it as "Unknown".
+    if name and mac and name:upper() == mac:gsub(":", "-"):upper() then
+        name = nil
+    end
+
     return {
-        mac = output:match("Device (%w+:%w+:%w+:%w+:%w+:%w+)"),
-        name = output:match("^(Name: |Alias: )(.*)\n"),
+        mac = mac,
+        name = name,
         paired = flag("Paired"),
         bonded = flag("Bonded"),
         trusted = flag("Trusted"),

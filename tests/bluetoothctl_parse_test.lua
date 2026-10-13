@@ -74,6 +74,31 @@ check("empty output is not connected", info.connected, false)
 info = Parse.info("Device 00:11:22:33:44:55 not available\n")
 check("missing flags are false", info.paired, false)
 
+-- Names: Alias is what the menu shows (bluetoothctl devices lists the alias),
+-- so it wins; Name is the fallback.
+check("name comes from Alias", Parse.info(CONNECTED).name, "Test Pager")
+
+local RENAMED = table.concat({
+    "Device 00:11:22:33:44:55 (public)",
+    "\tName: Factory Name",
+    "\tAlias: My Pager",
+    "\tPaired: yes",
+    "",
+}, "\n")
+check("Alias wins over Name", Parse.info(RENAMED).name, "My Pager")
+
+local NAME_ONLY = table.concat({
+    "Device 00:11:22:33:44:55 (public)",
+    "\tName: Factory Name",
+    "\tPaired: yes",
+    "",
+}, "\n")
+check("Name is the fallback", Parse.info(NAME_ONLY).name, "Factory Name")
+
+check("no name at all", Parse.info("Device 00:11:22:33:44:55 (public)\n\tPaired: no\n").name, nil)
+
+check("a dashed-MAC alias means unnamed", Parse.info(DISCOVERED).name, nil)
+
 if failures > 0 then
     print(failures .. " failure(s)")
     os.exit(1)
