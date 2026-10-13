@@ -4,6 +4,7 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local Device = require("device")
 
 local BackendSelect = require("bluetooth/controller/backend_select")
+local UIManager = require("ui/uimanager")
 
 -- No backend for this device (Kobo, Kindle, Android): don't load at all.
 -- KOReader skips a plugin whose main.lua returns { disabled = true }
@@ -21,6 +22,13 @@ local BluetoothDeviceStore = require("bluetooth/devicestore")
 local GithubAPI = require("bluetooth/ota/github_api")
 local BluetoothSelfUpdater = require("bluetooth/ota/self_updater")
 
+
+-- How long a wake must hold before the radio is switched back on. PocketBook
+-- bounces the app (resume, suspend ~1s later) on some wakes, and each
+-- netagent toggle makes the firmware draw its own Bluetooth dialogs over the
+-- cover screen. Waiting lets a bounce pass with no radio change at all.
+-- Chosen with Sabrina, 2026-10-13: the radio does not need to be instant.
+local WAKE_SETTLE_S = 2
 
 ---@class Bluetooth
 ---@field ui any This is a ReaderUI
@@ -110,15 +118,33 @@ function Bluetooth:restoreBluetoothState(allow_enable)
 end
 
 function Bluetooth:onResume()
-    logger.dbg("Bluetooth.koplugin: Device resumed, Restoring Bluetooth")
+    logger.dbg("Bluetooth.koplugin: Device resumed, restoring Bluetooth in " .. WAKE_SETTLE_S .. "s")
     -- Only restore a radio that was on before the suspend; one the user had
     -- turned off stays off.
-    local was_enabled = self.controller.was_enabled_before_suspend
+    local was_enabled = self.controller.was_enabled_before_suspend == true
     self.controller.was_enabled_before_suspend = nil
-    self:restoreBluetoothState(was_enabled == true)
+    if self._wake_restore then
+        UIManager:unschedule(self._wake_restore)
+    end
+    self._wake_was_enabled = was_enabled
+    self._wake_restore = function()
+        self._wake_restore = nil
+        self:restoreBluetoothState(was_enabled)
+    end
+    UIManager:scheduleIn(WAKE_SETTLE_S, self._wake_restore)
 end
 
 function Bluetooth:onSuspend()
+    if self._wake_restore then
+        -- Suspended again before the wake settled: the radio was never
+        -- switched back on, so there is nothing to snapshot or disable. Hand
+        -- the earlier "was on" over to the next resume.
+        logger.dbg("Bluetooth.koplugin: Suspending before the wake settled, leaving the radio alone")
+        UIManager:unschedule(self._wake_restore)
+        self._wake_restore = nil
+        self.controller.was_enabled_before_suspend = self._wake_was_enabled
+        return
+    end
     logger.dbg("Bluetooth.koplugin: Device suspending, disabling bluetooth")
     self.controller:snapshotBeforeSuspend(function()
         if self.settings:getDisableOnSuspend() then
