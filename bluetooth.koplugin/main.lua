@@ -84,8 +84,10 @@ end
 ---@param allow_enable boolean
 function Bluetooth:restoreBluetoothState(allow_enable)
     local function reconnect()
-        self.controller:knownDevices(function()
-            self.controller:reconnectOnWake()
+        self.controller:knownDevices(function(fresh)
+            -- Not fresh: the radio was switched again during the read, so the
+            -- list describes a radio that is gone.
+            if fresh then self.controller:reconnectOnWake() end
         end)
     end
 

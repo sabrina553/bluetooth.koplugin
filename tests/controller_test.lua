@@ -226,5 +226,54 @@ do
     end
 end
 
+-- Background read: the cache is served at once, the result is applied when
+-- it lands, reads in flight are shared and a result from before a radio
+-- change is dropped. Every callback fires exactly once.
+do
+    local c, calls = build(true, { ["AA:AA"] = { mac = "AA:AA", name = "Keyboard", paired = true, starred = true } })
+    local finish
+    fake.readSnapshot = function(_, done) calls.started = (calls.started or 0) + 1; finish = done end
+    local function dev(mac) return { mac = mac, name = mac, paired = true, skip_info = true } end
+
+    c.known_devices = { dev("OLD:OLD") }
+    local a, b = {}, {}
+    local list = c:knownDevices(function(ok) table.insert(a, ok) end)
+    c:knownDevices(function(ok) table.insert(b, ok) end)
+    check(list[1].mac == "OLD:OLD", "async: cached list served while reading")
+    check(calls.started == 1, "async: a second read joins the one in flight")
+    finish({ dev("AA:AA"), dev("BB:BB") })
+    check(#c.known_devices == 2, "async: result applied when it lands")
+    check(#a == 1 and a[1] == true and #b == 1 and b[1] == true, "async: both callbacks fire once with true")
+    check(c.known_devices[1].starred == true, "async: stored state applied to the new list")
+
+    -- Radio changed during the read: result dropped, callback false
+    local before = c.known_devices
+    local dropped = {}
+    c:knownDevices(function(ok) table.insert(dropped, ok) end)
+    c._poll_generation = (c._poll_generation or 0) + 1
+    finish({ dev("ZZ:ZZ") })
+    check(c.known_devices == before, "async: stale result not applied")
+    check(#dropped == 1 and dropped[1] == false, "async: stale callback fires once with false")
+
+    -- A failed read keeps the saved devices and the store
+    calls.saved = nil
+    c:knownDevices()
+    finish(nil)
+    check(#c.known_devices == 1 and c.known_devices[1].starred == true, "async: failed read serves the saved devices")
+    check(not calls.saved, "async: failed read does not rewrite the store")
+
+    -- A new read can start once the last has landed
+    c:knownDevices()
+    check(calls.started == 4, "async: reading flag cleared after a result")
+
+    -- Suspend reads block: the radio goes down right after
+    fake.knownDevices = function() calls.blocking = (calls.blocking or 0) + 1; return { dev("AA:AA") } end
+    finish({ dev("AA:AA") })
+    local snap_done
+    c:snapshotBeforeSuspend(function() snap_done = true end)
+    check(snap_done and calls.blocking == 1, "async: suspend snapshot uses the blocking read")
+    fake.readSnapshot = nil
+end
+
 if failures > 0 then os.exit(1) end
 print("controller_test: ok")

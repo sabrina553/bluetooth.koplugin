@@ -86,6 +86,11 @@ function pocketbook:knownDevices()
     return Bluez:knownDevices()
 end
 
+function pocketbook:readSnapshot(done)
+    Bluez.controller = self.controller
+    return Bluez:readSnapshot(done)
+end
+
 function pocketbook:search(duration)
     return Bluez:search(duration)
 end
