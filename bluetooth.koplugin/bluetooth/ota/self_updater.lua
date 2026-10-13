@@ -105,6 +105,13 @@ function BluetoothSelfUpdater:isUpdateAvailable()
     return Version.isNewer(current_version, latest_version)
 end
 
+--- True when the offered release is another pre-release stage of the running
+--- version (see Version.isStageSwitch).
+function BluetoothSelfUpdater:isStageSwitch()
+    local current_version = "v" .. PluginMetadata.getVersion()
+    return Version.isStageSwitch(current_version, self.latest_known_version or current_version)
+end
+
 function BluetoothSelfUpdater:getLatestReleaseVersion()
     -- Get the latest release version from github
     local current_version = "v" .. PluginMetadata.getVersion()

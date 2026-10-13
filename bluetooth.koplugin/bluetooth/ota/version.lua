@@ -98,6 +98,20 @@ function Version.isNewer(current, candidate)
     return Version.compare(candidate, current) > 0
 end
 
+--- Whether moving between these versions changes pre-release stage within
+--- the same x.y.z (e.g. dev.6 -> beta.1). Labels rank by pipeline stage, so
+--- that counts as an upgrade even though the beta may lack newer dev work;
+--- the UI warns instead of hiding it (decision 2026-10-13).
+---@param current string
+---@param candidate string
+---@return boolean
+function Version.isStageSwitch(current, candidate)
+    local a, b = Version.parse(current), Version.parse(candidate)
+    return a ~= nil and b ~= nil
+        and a.label ~= nil and b.label ~= nil and a.label ~= b.label
+        and a.major == b.major and a.minor == b.minor and a.patch == b.patch
+end
+
 ---@param channel string
 ---@return boolean
 function Version.isChannel(channel)

@@ -79,6 +79,18 @@ pick("checksum file alone is not the zip",
     { release("0.0.5", { checksum_only = true }), release("0.0.4") }, "stable", "0.0.4")
 pick("nothing suitable", { release("0.0.5-dev.1") }, "stable", nil)
 
+local function switch(current, candidate, expected)
+    check(("isStageSwitch(%s, %s)"):format(current, candidate),
+        Version.isStageSwitch(current, candidate), expected)
+end
+
+-- Stage switches: same x.y.z, different pre-release label
+switch("0.0.5-dev.6", "0.0.5-beta.1", true)
+switch("0.0.5-dev.6", "0.0.5-dev.7", false)
+switch("0.0.5-beta.1", "0.0.5", false)
+switch("0.0.5-dev.6", "0.0.6-beta.1", false)
+switch("v0.0.5-dev.6", "0.0.5-rc.1", true)
+
 if failures > 0 then
     print(failures .. " failure(s)")
     os.exit(1)
