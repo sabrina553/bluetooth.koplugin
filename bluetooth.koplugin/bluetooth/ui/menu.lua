@@ -200,6 +200,13 @@ function BluetoothMenu:buildMenuTable()
             separator = true,
         },
     }
+    if not self.controller.is_enabled then
+        -- Devices below come from the cache; tapping one turns Bluetooth on.
+        table.insert(menu, {
+            text = _("Bluetooth is off, showing saved devices"),
+            enabled = false,
+        })
+    end
     self:pairedDevices(menu, self.controller.known_devices)
     return menu
 end
