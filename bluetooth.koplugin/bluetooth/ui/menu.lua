@@ -757,8 +757,8 @@ function BluetoothMenu:showPluginUpdateCheck(skip_version_check)
     if is_update_available then
         update_button_text = T(_("Update to %1"), latest_version)
         title = _("Update available for Bluetooth.koplugin.")
-        if self.updater:isStageSwitch() then
-            title = title .. "\n\n" .. _("Note: this is a different pre-release stage and may be older than your build. Changes made since it was cut may be missing.")
+        if self.updater:isDowngrade() then
+            title = title .. "\n\n" .. T(_("Note: this is older than your installed version (%1). Updating will revert it."), PluginMetadata.getVersion())
         end
     end
 

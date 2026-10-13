@@ -47,7 +47,6 @@ check("stable takes 0.0.4", Version.channelAccepts("stable", "0.0.4"), true)
 check("stable skips beta", Version.channelAccepts("stable", "0.0.4-beta.1"), false)
 check("beta takes beta", Version.channelAccepts("beta", "0.0.4-beta.1"), true)
 check("beta takes rc", Version.channelAccepts("beta", "0.0.4-rc.1"), true)
-check("beta takes stable", Version.channelAccepts("beta", "0.0.4"), true)
 check("beta skips dev", Version.channelAccepts("beta", "0.0.4-dev.3"), false)
 check("development takes dev", Version.channelAccepts("development", "0.0.4-dev.3"), true)
 check("development takes legacy dev", Version.channelAccepts("development", "0.0.3.dev.3"), true)
@@ -79,17 +78,17 @@ pick("checksum file alone is not the zip",
     { release("0.0.5", { checksum_only = true }), release("0.0.4") }, "stable", "0.0.4")
 pick("nothing suitable", { release("0.0.5-dev.1") }, "stable", nil)
 
-local function switch(current, candidate, expected)
-    check(("isStageSwitch(%s, %s)"):format(current, candidate),
-        Version.isStageSwitch(current, candidate), expected)
-end
+-- A channel follows its own branch: no cross-stage offers
+check("stable skips dev", Version.channelAccepts("stable", "0.0.4-dev.3"), false)
+check("beta skips stable", Version.channelAccepts("beta", "0.0.4"), false)
+check("development skips beta", Version.channelAccepts("development", "0.0.4-beta.1"), false)
+check("development skips stable", Version.channelAccepts("development", "0.0.4"), false)
+pick("dev channel ignores a higher-ranked beta",
+    { release("0.0.5-beta.1"), release("0.0.5-dev.7"), release("0.0.5-dev.6") }, "development", "0.0.5-dev.7")
+pick("beta channel ignores dev", { release("0.0.5-dev.7"), release("0.0.5-beta.1") }, "beta", "0.0.5-beta.1")
 
--- Stage switches: same x.y.z, different pre-release label
-switch("0.0.5-dev.6", "0.0.5-beta.1", true)
-switch("0.0.5-dev.6", "0.0.5-dev.7", false)
-switch("0.0.5-beta.1", "0.0.5", false)
-switch("0.0.5-dev.6", "0.0.6-beta.1", false)
-switch("v0.0.5-dev.6", "0.0.5-rc.1", true)
+check("isDifferent older", Version.isDifferent("0.0.5-dev.7", "0.0.4"), true)
+check("isDifferent same", Version.isDifferent("v0.0.5-dev.7", "0.0.5-dev.7"), false)
 
 if failures > 0 then
     print(failures .. " failure(s)")
