@@ -83,12 +83,8 @@ function pocketbook:knownDevices()
     return Bluez:knownDevices()
 end
 
-function pocketbook:scan()
-    return Bluez:scan()
-end
-
-function pocketbook:search()
-    return Bluez:search()
+function pocketbook:search(duration)
+    return Bluez:search(duration)
 end
 
 function pocketbook:info(mac)
