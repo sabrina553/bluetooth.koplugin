@@ -146,7 +146,9 @@ end
 ---@param callback fun()|nil
 function controller:snapshotBeforeSuspend(callback)
     self:status()
-    self.was_enabled_before_suspend = self.is_enabled
+    -- Intent, not the reading: a suspend mid-enable sees the radio still off,
+    -- and resume would then leave it off (seen 2026-10-13, quick suspend cycles).
+    self.was_enabled_before_suspend = self:wantsEnabled()
     if not self.is_enabled then
         logger.dbg("Bluetooth: radio is off at suspend, nothing to snapshot")
         if callback then callback() end
@@ -267,6 +269,21 @@ function controller:isDisabling()
         and self._disabling_generation == self._poll_generation
 end
 
+--- True while an enable() has been called and not yet confirmed or superseded.
+function controller:isEnabling()
+    return self._enabling_generation ~= nil
+        and self._enabling_generation == self._poll_generation
+end
+
+--- What the radio is heading towards, as opposed to what it reads right now.
+--- A second tap mid-transition reads the old state, so toggle() would repeat
+--- the first command (seen 2026-10-13: disable, disable on one tap each).
+function controller:wantsEnabled()
+    if self:isDisabling() then return false end
+    if self:isEnabling() then return true end
+    return self.is_enabled
+end
+
 -- After a disable command has been sent, the next "on" must wait for the
 -- radio to report off, or it races the shutdown. Gives up after the same
 -- budget as pollField and sends anyway, since a stuck radio is worse.
@@ -299,10 +316,14 @@ function controller:enable(callback)
     -- polling status() concurrently against the same underlying radio.
     self._poll_generation = (self._poll_generation or 0) + 1
     local my_generation = self._poll_generation
+    self._enabling_generation = my_generation
     local release = Standby.hold()
     local user_callback = callback
     callback = function(confirmed)
         release()
+        if self._enabling_generation == my_generation then
+            self._enabling_generation = nil
+        end
         if user_callback then user_callback(confirmed) end
     end
 
@@ -355,7 +376,7 @@ end
 
 function controller:toggle(callback)
     self:status()
-    if self.is_enabled then
+    if self:wantsEnabled() then
         return self:disable(callback)
     else
         return self:enable(callback)
@@ -419,7 +440,16 @@ function controller:knownDevices(callback)
             previous[dev.mac] = dev
         end
 
-        self.known_devices = self:callDeviceFunction("knownDevices") or {}
+        local live = self:callDeviceFunction("knownDevices")
+        if live == nil then
+            -- The backend could not read (timed out), which is not the same
+            -- as "no devices": keep what we had.
+            self._read_failed = true
+            live = {}
+        else
+            self._read_failed = false
+        end
+        self.known_devices = live
 
         local queried = 0
         for _, dev in ipairs(self.known_devices) do
@@ -465,6 +495,22 @@ function controller:knownDevices(callback)
     end
 
     refresh()
+    -- A failed or empty live read can happen while bluetoothd restarts after
+    -- a quick suspend/resume (0 devices at 12:55:28 on 2026-10-13, two
+    -- timed-out reads at 13:25:07). Saving that wiped every starred and
+    -- connected flag, so wake had nothing to reconnect. Never replace a
+    -- populated store with it. Trade-off: if BlueZ really has no devices
+    -- left, the stale entries stay until a non-empty read; accepted because
+    -- BlueZ keeps scan results, so a truly empty list is very rare.
+    local store_has_devices = self.device_store and self.device_store.data
+        and next(self.device_store.data) ~= nil
+    if (self._read_failed or #self.known_devices == 0) and store_has_devices then
+        logger.warn("Bluetooth: live read returned no devices, keeping the saved ones")
+        self.known_devices = self:devicesFromStore()
+        self:applyStoredDeviceState()
+        if callback then callback(true) end
+        return self.known_devices
+    end
     -- Keep the cache current for the radio-off case, not just at suspend.
     self:persistDeviceState()
     if callback then callback(true) end

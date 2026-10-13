@@ -45,18 +45,38 @@ local function run(cmd)
     os.execute(cmd .. " >/dev/null 2>&1 &")
 end
 
+local CAPTURE_TIMEOUT_S = 5
+
 --- Output of a command, stdout and stderr together (a rejected command
 --- reports on stderr). A field, not a local, so tests can replace it.
 ---@param cmd string
 ---@return string
 function bluez.capture(cmd)
-    local handle = io.popen(cmd .. " 2>&1")
+    -- A bluetoothctl that cannot reach a restarting bluetoothd never returns
+    -- and froze KOReader until it was killed (13:12:52 and 13:14:08 on
+    -- 2026-10-13, a read right after a quick resume). The timeout turns the
+    -- hang into a failed read. BusyBox and GNU timeout both take -k.
+    -- The exit status is appended because a timed-out read looks like an
+    -- empty device list otherwise, and saving that wiped the starred flags.
+    bluez.last_rc = nil
+    local handle = io.popen("timeout -k 1 " .. CAPTURE_TIMEOUT_S .. " " .. cmd .. " 2>&1; echo __rc=$?")
     if not handle then
         return ""
     end
     local output = handle:read("*a") or ""
     handle:close()
+    local rc = output:match("__rc=(%d+)%s*$")
+    if rc then
+        bluez.last_rc = tonumber(rc)
+        output = output:gsub("__rc=%d+%s*$", "")
+    end
     return output
+end
+
+--- Whether the last capture was cut off by the timeout: 124 (GNU), 143 (BusyBox
+--- after SIGTERM, measured on the reader) or 137 (it needed the kill).
+function bluez.lastTimedOut()
+    return bluez.last_rc == 124 or bluez.last_rc == 143 or bluez.last_rc == 137
 end
 
 function bluez:new(ctrl)
@@ -144,6 +164,9 @@ function bluez:pairedMacs()
 
     for _, cmd in ipairs(candidates) do
         local output = self.capture(cmd)
+        if bluez.lastTimedOut() then
+            return nil
+        end
         if not Parse.isUnsupportedCommand(output) then
             if bluez.paired_command ~= cmd then
                 bluez.paired_command = cmd
@@ -168,7 +191,14 @@ end
 --- refreshes slow once a scan had cached a few dozen devices.
 function bluez:knownDevices()
     local listing = Parse.deviceList(self.capture("bluetoothctl devices"))
+    if bluez.lastTimedOut() then
+        logger.warn("Bluez: listing devices timed out")
+        return nil -- a failed read, not an empty list
+    end
     local paired = self:pairedMacs()
+    if paired == nil and bluez.lastTimedOut() then
+        return nil
+    end
 
     local devices = {}
     for _, entry in ipairs(listing) do

@@ -178,5 +178,53 @@ do
     check(holds == 0, "standby: released when superseded, got " .. holds)
 end
 
+-- A second tap while a transition is in flight reverses it, not repeats it,
+-- even though the radio still reads the old state.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    local on, order = true, {}
+    local c = build(true)
+    fake.status = function() return on end
+    fake.disable = function() table.insert(order, "off") end
+    fake.enable = function() table.insert(order, "on"); on = true end
+    c:toggle()                 -- radio reads on: heads off
+    check(not c:wantsEnabled(), "toggle: wants off after first tap")
+    c:toggle()                 -- still reads on, but should now enable
+    check(c:wantsEnabled(), "toggle: wants on after second tap")
+    c:toggle()                 -- and back to off
+    check(not c:wantsEnabled(), "toggle: wants off after third tap")
+    on = false
+    drain()
+    check(table.concat(order, ",") == "off", "toggle: only the last intent sent, got " .. table.concat(order, ","))
+end
+
+-- Suspend while an enable is still in flight counts as "was on", so resume
+-- restores it.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    local c = build(false)
+    fake.status = function() return false end
+    c:enable()
+    c:snapshotBeforeSuspend()
+    check(c.was_enabled_before_suspend == true, "snapshot: mid-enable counts as on")
+    c:disable()
+    c:snapshotBeforeSuspend()
+    check(c.was_enabled_before_suspend == false, "snapshot: mid-disable counts as off")
+    drain()
+end
+
+-- A failed or empty live read over a populated store is never saved: the
+-- cached devices are served and starred stays.
+do
+    local c, calls = build(true, { ["AA:AA"] = { mac = "AA:AA", name = "Keyboard", paired = true, starred = true } })
+    for _, read in ipairs({ function() return {} end, function() return nil end }) do
+        fake.knownDevices = read
+        calls.saved = nil
+        local list = c:knownDevices()
+        check(#list == 1 and list[1].starred == true, "failed read: cached device served with starred kept")
+        check(not calls.saved, "failed read: store not rewritten")
+    end
+end
+
 if failures > 0 then os.exit(1) end
 print("controller_test: ok")
