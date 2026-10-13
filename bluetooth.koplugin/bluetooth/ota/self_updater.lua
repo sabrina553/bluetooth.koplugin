@@ -81,7 +81,8 @@ local function findPluginInArchive(reader, expected_repository)
                 local ok, content = pcall(function()
                     return reader:extractToMemory(entry.path)
                 end)
-                if ok and content and content:match(expected_repository) then
+                -- Plain find: "." and "-" in repository names are Lua pattern magic.
+                if ok and content and content:find(expected_repository, 1, true) then
                     return entry_directory
                 end
             end
