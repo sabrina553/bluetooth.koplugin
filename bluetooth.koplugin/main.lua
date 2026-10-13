@@ -78,7 +78,7 @@ function Bluetooth:restoreBluetoothState(allow_enable)
     local function reconnect()
         self.controller:knownDevices(function()
             self.controller:reconnectOnWake()
-        end, { leave_enabled = true })
+        end)
     end
 
     self.controller:status()

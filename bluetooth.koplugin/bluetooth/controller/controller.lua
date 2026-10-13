@@ -8,6 +8,7 @@ local BackendSelect = require("bluetooth/controller/backend_select")
 local PocketBook = require("bluetooth/controller/pocketbook")
 local Bluez = require("bluetooth/controller/bluez")
 local Parse = require("bluetooth/controller/bluetoothctl_parse")
+local Devices = require("bluetooth/controller/devices")
 
 -- Sub-second clock for timing logs; os.time is only whole seconds.
 local socket_ok, socket = pcall(require, "socket")
@@ -308,24 +309,42 @@ function controller:enableWhenDisabled(callback)
     end
 end
 
---- Refreshes self.known_devices from the backend.
----
---- Only PocketBook's netagent needs the radio actually on to answer a
---- device query at all - other backends can just refresh directly. For
---- PocketBook, if the radio is currently off, this enables it just long
---- enough to read device info, then (by default) turns it back off again
---- afterward, since being asked "what devices do you know about" shouldn't
---- by itself leave the radio running.
+--- Rebuilds known_devices from the persisted store, for when the radio is
+--- off. With the radio off there is no bluetoothd, so bluetoothctl returns
+--- nothing at all (checked on the reader, 2026-10-13); the cache is the only
+--- source. Nothing is connected while the radio is off.
+--- Decision: Docs/Controller design in the vault ("Reads are pure").
+---@return Devices[]
+function controller:devicesFromStore()
+    local list = {}
+    if not (self.device_store and self.device_store.data) then
+        return list
+    end
+    for mac, entry in pairs(self.device_store.data) do
+        table.insert(list, Devices:new({
+            mac = mac,
+            name = entry.name,
+            paired = entry.paired,
+            bonded = entry.bonded,
+            trusted = entry.trusted,
+            blocked = entry.blocked,
+            connected = false,
+            starred = entry.starred,
+            backend = self.backend,
+            controller = self,
+        }))
+    end
+    table.sort(list, function(x, y) return x.name < y.name end)
+    return list
+end
+
+--- Refreshes self.known_devices. A read never changes the radio's power:
+--- on PocketBook with the radio off it serves the cached list instead.
+--- Explicit actions (connect, pair, scan) enable the radio themselves.
 ---
 ---@param callback fun(confirmed: boolean)|nil invoked exactly once
----@param opts table|nil { leave_enabled: boolean } - pass { leave_enabled =
----  true } when the caller needs Bluetooth to stay on after this refresh
----  completes (e.g. reconnectOnWake(), which needs to actually connect to
----  devices right afterward - if this function turned the radio back off
----  first, that connect would immediately fail).
-function controller:knownDevices(callback, opts)
+function controller:knownDevices(callback)
     logger.dbg("Refreshing known devices")
-    opts = opts or {}
 
     local function refresh()
         local started = now()
@@ -368,47 +387,21 @@ function controller:knownDevices(callback, opts)
         return self.known_devices
     end
 
-    if self.backend ~= backends.PocketBook then
-        refresh()
-        if callback then callback(true) end
-        return self.known_devices
+    if self.backend == backends.PocketBook then
+        self:status()
+        if not self.is_enabled then
+            self.known_devices = self:devicesFromStore()
+            self:applyStoredDeviceState()
+            logger.dbg(string.format("Bluetooth: radio off, using %d cached devices", #self.known_devices))
+            if callback then callback(true) end
+            return self.known_devices
+        end
     end
 
-    self:status()
-    if self.is_enabled then
-        refresh()
-        if callback then callback(true) end
-        return self.known_devices
-    end
-
-    self:enable(function(enabled_confirmed)
-        if not enabled_confirmed then
-            if callback then callback(false) end
-            return
-        end
-
-        refresh()
-
-        if not opts.leave_enabled then
-            -- We were the one who turned it on just to read this. Its
-            -- confirmation is independent of whether the refresh itself
-            -- succeeded, so it must NOT invoke `callback` again below -
-            -- that already fired once, and calling it a second time
-            -- (possibly with a contradictory result) is exactly the bug
-            -- this replaced.
-            self:disable(function(disable_confirmed)
-                if not disable_confirmed then
-                    logger.warn("Bluetooth: could not confirm re-disable after a knownDevices()-triggered enable")
-                end
-            end)
-        end
-
-        if callback then callback(true) end
-    end)
-
-    -- Necessarily stale here - the enable/refresh/disable chain above is
-    -- still in flight. Callers that need the fresh list must use the
-    -- callback, not this return value.
+    refresh()
+    -- Keep the cache current for the radio-off case, not just at suspend.
+    self:persistDeviceState()
+    if callback then callback(true) end
     return self.known_devices
 end
 
