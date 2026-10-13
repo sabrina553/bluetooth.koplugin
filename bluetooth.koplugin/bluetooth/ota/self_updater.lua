@@ -101,7 +101,7 @@ end
 ---@field is_pending_restart boolean
 local BluetoothSelfUpdater = {
     plugin_path = getPluginPath(),
-    release_asset_name = "%a+.koplugin.zip",
+    release_asset_name = "^bluetooth%.koplugin%.zip$",
     release_cache_path = DataStorage:getDataDir() .. "/cache/bluetooth"
 }
 
@@ -140,27 +140,6 @@ function BluetoothSelfUpdater:getUpdateChannel()
     return self.settings:getUpdateChannel()
 end
 
---- Highest release version the channel accepts. Chosen by version, not by
---- GitHub's list order, so publishing an older hotfix after a newer
---- pre-release can't make it look like the latest.
----@param releases table[]
----@param channel string
----@return string|nil
-local function pickLatestForChannel(releases, channel)
-    local latest = nil
-    for _, release in ipairs(releases) do
-        local version = release.tag_name
-        -- A release marked pre-release on GitHub never reaches stable,
-        -- whatever its tag says.
-        local allowed = Version.channelAccepts(channel, version)
-            and not (channel == "stable" and release.prerelease)
-        if allowed and (latest == nil or Version.isNewer(latest, version)) then
-            latest = version
-        end
-    end
-    return latest
-end
-
 ---@return boolean ok false when the check itself failed (offline, rate-limited...)
 ---@return string|nil err
 function BluetoothSelfUpdater:fetchLatestVersion()
@@ -178,7 +157,7 @@ function BluetoothSelfUpdater:fetchLatestVersion()
 
     -- nil when the channel has no release yet; don't keep a version cached
     -- from the previously selected channel.
-    local version = pickLatestForChannel(releases, channel)
+    local version = Version.pickLatest(releases, channel, self.release_asset_name)
 
     self.latest_known_version = version
     -- Tracked so a caller (e.g. the menu) can tell whether the cached
