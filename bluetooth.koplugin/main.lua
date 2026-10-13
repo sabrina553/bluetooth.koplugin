@@ -49,7 +49,7 @@ function Bluetooth:init()
 
     self:restoreBluetoothState()
 
-    logger:dbg("Bluetooth.koplugin: Initialized")
+    logger.dbg("Bluetooth.koplugin: Initialized")
 end
 
 function Bluetooth:restoreBluetoothState()

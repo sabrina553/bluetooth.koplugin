@@ -41,7 +41,7 @@ function BluetoothDeviceStore:init()
     if success then
         self.data = result
     else
-        logger:err("Bluetooth DeviceStore: Error reading store, using empty table", result)
+        logger.err("Bluetooth DeviceStore: Error reading store, using empty table", result)
         self.data = {}
         self:write()
     end
@@ -50,7 +50,7 @@ end
 function BluetoothDeviceStore:write()
     local success, error_msg = pcall(function()
         if not self.store then
-            logger:err("Bluetooth DeviceStore: No store object available for write")
+            logger.err("Bluetooth DeviceStore: No store object available for write")
             return false
         end
         self.store:saveSetting(SETTING_KEY, self.data)
@@ -59,7 +59,7 @@ function BluetoothDeviceStore:write()
     end)
 
     if not success then
-        logger:err("Bluetooth DeviceStore: error writing store:", error_msg)
+        logger.err("Bluetooth DeviceStore: error writing store:", error_msg)
         return false
     end
 

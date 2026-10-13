@@ -13,14 +13,14 @@ local logger = require("logger")
 
 local function verifyDigest(path, digest)
     if type(digest) ~= "string" then
-        logger:err("No digest provided for asset, cannot verify")
+        logger.err("No digest provided for asset, cannot verify")
         return false
     end
 
     local digest_type, expected_digest_hex = digest:match("(%w+):(%x+)")
 
     if digest_type ~= "sha256" then
-        logger:err("Unknown digest type", digest_type)
+        logger.err("Unknown digest type", digest_type)
         return false
     end
 
@@ -39,7 +39,7 @@ local function verifyDigest(path, digest)
     local actual_digest_hex = sha2.sha256(content)
 
     if expected_digest_hex:lower() ~= actual_digest_hex:lower() then
-        logger:err("Digest mismatch:", expected_digest_hex, "!=", actual_digest_hex)
+        logger.err("Digest mismatch:", expected_digest_hex, "!=", actual_digest_hex)
         return false
     end
 
@@ -163,7 +163,7 @@ end
 
 function BluetoothSelfUpdater:fetchLatestVersion()
     if not PluginMetadata.hasRepository() then
-        logger:warn("Unknown repository - cannot fetch latest version")
+        logger.warn("Unknown repository - cannot fetch latest version")
         return
     end
 
@@ -187,12 +187,12 @@ end
 
 function BluetoothSelfUpdater:downloadLatestRelease(progress_callback)
     if not self.latest_known_version then
-        logger:err("Latest release is not defined")
+        logger.err("Latest release is not defined")
         return false, g("No latest release")
     end
 
     if not PluginMetadata.hasRepository() then
-        logger:warn("Unknown repository - cannot fetch latest version")
+        logger.warn("Unknown repository - cannot fetch latest version")
         return false, g("No repository defined")
     end
 
@@ -223,7 +223,7 @@ function BluetoothSelfUpdater:downloadLatestRelease(progress_callback)
     )
 
     if not ok then
-        logger:err("Failed to download release", result)
+        logger.err("Failed to download release", result)
         return false, result
     end
 
@@ -323,7 +323,7 @@ function BluetoothSelfUpdater:update(progress_callback)
         util.removeFile(download_path)
 
         if not extract_ok then
-            logger:err("Extraction failed:", extract_message)
+            logger.err("Extraction failed:", extract_message)
             if progress_callback then
                 progress_callback("failed", 100, extract_message)
             end

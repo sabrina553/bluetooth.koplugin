@@ -57,7 +57,7 @@ function BluetoothSettings:init()
     if success then
         self.data = result
     else
-        logger:err("Bluetooth Settings: Error reading settings, using defaults", result)
+        logger.err("Bluetooth Settings: Error reading settings, using defaults", result)
         self.data = shallowCopy(DEFAULTS)
         self:write()
     end
@@ -66,19 +66,19 @@ end
 function BluetoothSettings:write()
     local success, error_msg = pcall(function()
         if not self.settings then
-            logger:err("Bluetooth Settings: No settings object available for write")
+            logger.err("Bluetooth Settings: No settings object available for write")
             return false
         end
 
-        logger:dbg("Bluetooth: Saving settings data", self.data)
+        logger.dbg("Bluetooth: Saving settings data", self.data)
         self.settings:saveSetting(SETTING_KEY, self.data)
         self.settings:flush()
-        logger:dbg("Settings saved and flushed successfully")
+        logger.dbg("Settings saved and flushed successfully")
         return true
     end)
 
     if not success then
-        logger:err("error writing settings:", error_msg)
+        logger.err("error writing settings:", error_msg)
         return false
     end
 
@@ -169,7 +169,7 @@ end
 ---@param channel string "stable" | "beta" | "development"
 function BluetoothSettings:setUpdateChannel(channel)
     if not Version.isChannel(channel) then
-        logger:warn("Bluetooth Settings: ignoring unknown update channel", tostring(channel))
+        logger.warn("Bluetooth Settings: ignoring unknown update channel", tostring(channel))
         return
     end
     self.data.update_channel = channel

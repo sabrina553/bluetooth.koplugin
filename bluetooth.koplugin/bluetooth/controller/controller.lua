@@ -50,7 +50,7 @@ function controller:init()
     self:status()
     self:knownDevices()
 
-    logger:dbg("Bluetooth.koplugin.Controller Initialized")
+    logger.dbg("Bluetooth.koplugin.Controller Initialized")
 end
 
 function controller:Devicetype()
