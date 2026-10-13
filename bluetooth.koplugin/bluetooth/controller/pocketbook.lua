@@ -39,6 +39,19 @@ function pocketbook:status()
     return true
 end
 
+--- Same question as status(), asked in the background: done(true|false), or
+--- done(nil) when netagent gave no answer (timed out), so the caller keeps
+--- what it had instead of guessing "on" as status() does.
+---@param done fun(enabled: boolean|nil)
+function pocketbook:readStatus(done)
+    Bluez.runAsync("timeout -k 1 5 netagent bt status 2>/dev/null\n", function(output)
+        if not output or output:match("^%s*$") then
+            return done(nil)
+        end
+        done(output:find("BT_STATE_OFF") == nil)
+    end)
+end
+
 function pocketbook:enable()
     logger.dbg("Pocketbook-Netagent: Enabling Bluetooth...")
     os.execute('netagent bt on >/dev/null 2>&1 &')
