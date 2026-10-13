@@ -294,17 +294,6 @@ function BluetoothMenu:getSettingsMenu()
             keep_menu_open = true,
         },
         {
-            text = _("Disable on lock"),
-            checked_func = function()
-                return self.settings:getDisableOnLock()
-            end,
-            callback = function()
-                self.settings:toggleDisableOnLock() -- toggles :? 
-                UIManager:broadcastEvent(Event:new("BluetoothSettingsChanged"))
-            end,
-            keep_menu_open = true,
-        },
-        {
             text = _("Disable on Suspend"),
             checked_func = function()
                 return self.settings:getDisableOnSuspend()

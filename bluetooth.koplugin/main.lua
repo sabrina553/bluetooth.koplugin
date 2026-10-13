@@ -104,13 +104,4 @@ function Bluetooth:onSuspend()
     end)
 end
 
-function Bluetooth:onPause()
-    logger.dbg("Bluetooth.koplugin: Device pausing, disabling bluetooth")
-    self.controller:snapshotBeforeSuspend(function()
-        if self.settings:getDisableOnLock() then
-            self.controller:disable()
-        end
-    end)
-end
-
 return Bluetooth
