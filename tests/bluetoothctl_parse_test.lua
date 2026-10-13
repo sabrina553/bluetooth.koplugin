@@ -118,6 +118,10 @@ check("nil listing", #Parse.deviceList(nil), 0)
 check("mask keeps the last two bytes", Parse.maskMac("00:11:22:33:44:55"), "XX:XX:XX:XX:44:55")
 check("mask passes nil through as text", Parse.maskMac(nil), "nil")
 check("mask passes other text through", Parse.maskMac("not a mac"), "not a mac")
+check("mask path", Parse.maskMac("/org/bluez/hci0/dev_00_11_22_33_44_55"), "/org/bluez/hci0/dev_XX_XX_XX_XX_44_55")
+check("mask MAC inside text", Parse.maskMac("device 00:11:22:33:44:55 gone"), "device XX:XX:XX:XX:44:55 gone")
+check("mixed separators are not a MAC", Parse.maskMac("00:11_22:33:44:55"), "00:11_22:33:44:55")
+
 
 -- command support differs between BlueZ versions
 check("5.52 rejects 'devices Paired'", Parse.isUnsupportedCommand("\27[1;39mToo many arguments\27[0m\n"), true)
