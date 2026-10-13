@@ -7,6 +7,7 @@ local _ = require("gettext")
 local BackendSelect = require("bluetooth/controller/backend_select")
 local PocketBook = require("bluetooth/controller/pocketbook")
 local Bluez = require("bluetooth/controller/bluez")
+local Standby = require("bluetooth/standby")
 local Parse = require("bluetooth/controller/bluetoothctl_parse")
 local Devices = require("bluetooth/controller/devices")
 
@@ -298,6 +299,12 @@ function controller:enable(callback)
     -- polling status() concurrently against the same underlying radio.
     self._poll_generation = (self._poll_generation or 0) + 1
     local my_generation = self._poll_generation
+    local release = Standby.hold()
+    local user_callback = callback
+    callback = function(confirmed)
+        release()
+        if user_callback then user_callback(confirmed) end
+    end
 
     local function send()
         self:callDeviceFunction("enable")
@@ -322,8 +329,10 @@ function controller:disable(callback)
     self._poll_generation = (self._poll_generation or 0) + 1
     local my_generation = self._poll_generation
     self._disabling_generation = my_generation
+    local release = Standby.hold()
 
     local function done(confirmed)
+        release()
         if self._disabling_generation == my_generation then
             self._disabling_generation = nil
         end

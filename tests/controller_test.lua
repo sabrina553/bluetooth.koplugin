@@ -18,10 +18,13 @@ package.preload["ui/widget/infomessage"] = function() return { new = function() 
 -- Scheduled work runs only when the test says so, so a stray enable/disable
 -- shows up as a queued task instead of vanishing.
 local queue = {}
+local holds = 0 -- standby holds currently taken
 package.preload["ui/uimanager"] = function()
     return {
         show = function() end,
         scheduleIn = function(_, _, fn) table.insert(queue, fn) end,
+        preventStandby = function() holds = holds + 1 end,
+        allowStandby = function() holds = holds - 1 end,
     }
 end
 
@@ -146,6 +149,33 @@ do
     drain()
     check(table.concat(order, ",") == "off,on", "wait: on sent after off, got " .. table.concat(order, ","))
     check(enabled == true, "wait: enable confirmed")
+end
+
+-- Standby is held while waiting on the radio and always released, whichever
+-- way the call ends (confirmed, timed out, superseded).
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local on = false
+    local c = build(false)
+    fake.status = function() return on end
+    fake.enable = function() on = true end
+    c:enable()
+    check(holds == 1, "standby: held while enabling, got " .. holds)
+    drain()
+    check(holds == 0, "standby: released after confirm, got " .. holds)
+
+    on = false
+    fake.enable = function() end -- radio never comes up
+    c:enable()
+    drain()
+    check(holds == 0, "standby: released after timeout, got " .. holds)
+
+    c:enable()
+    c:disable()
+    check(holds == 2, "standby: one hold per pending call, got " .. holds)
+    drain()
+    check(holds == 0, "standby: released when superseded, got " .. holds)
 end
 
 if failures > 0 then os.exit(1) end

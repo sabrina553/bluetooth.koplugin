@@ -2,6 +2,7 @@ local logger = require("logger")
 local UIManager = require("ui/uimanager")
 
 local Parse = require("bluetooth/controller/bluetoothctl_parse")
+local Standby = require("bluetooth/standby")
 
 ---@class Devices
 ---@field mac string
@@ -76,8 +77,10 @@ end
 ---@param expected boolean
 ---@param callback fun(confirmed: boolean)|nil called once, with true if state was confirmed
 ---@param attempt integer|nil internal, do not pass
-local function pollField(self, field, expected, callback, attempt)
+local function pollField(self, field, expected, callback, attempt, release)
     attempt = attempt or 1
+    -- Held from the first check to the final answer, see bluetooth/standby.lua.
+    release = release or Standby.hold()
     local max_attempts = 10
     local delay_s = 1
 
@@ -86,18 +89,20 @@ local function pollField(self, field, expected, callback, attempt)
     if self[field] == expected then
         logger.dbg("Devices: " .. field .. " of " .. Parse.maskMac(self.mac) ..
             " is " .. tostring(expected) .. " after " .. attempt .. " check(s)")
+        release()
         if callback then callback(true) end
         return
     end
 
     if attempt >= max_attempts then
         logger.warn("Devices: could not confirm " .. field .. " state for " .. Parse.maskMac(self.mac))
+        release()
         if callback then callback(false) end
         return
     end
 
     UIManager:scheduleIn(delay_s, function()
-        pollField(self, field, expected, callback, attempt + 1)
+        pollField(self, field, expected, callback, attempt + 1, release)
     end)
 end
 
