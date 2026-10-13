@@ -70,10 +70,11 @@ end
 
 function bluez:pair(mac)
     logger.dbg("Bluez: Pairing with Bluetooth device: " .. mac)
-    os.execute(string.format(
-        'echo -e "agent NoInputNoOutput\\ndefault-agent\\npair %s\\nquit\\n" | bluetoothctl &', -- maybe worth repeating this for other commands
-        mac
-    ))
+    os.execute('bluetoothctl pair ' .. mac .. ' &')
+    -- os.execute(string.format(
+    --     'echo -e "agent NoInputNoOutput\\ndefault-agent\\npair %s\\nquit\\n" | bluetoothctl &', -- maybe worth repeating this for other commands
+    --     mac
+    -- ))
 end
 
 function bluez:unpair(mac)

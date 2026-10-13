@@ -1,6 +1,7 @@
 local DataStorage = require("datastorage")
 local LuaSettings = require("luasettings")
 local logger = require("logger")
+local Version = require("bluetooth/ota/version")
 
 ---@class BluetoothSettingsData
 ---@field disable_on_lock boolean
@@ -8,12 +9,7 @@ local logger = require("logger")
 ---@field enable_on_wake boolean
 ---@field starred_on_wake boolean
 ---@field last_on_wake boolean
----@field update_channel string "stable" | "development"
-
-local UPDATE_CHANNELS = {
-    stable = true,
-    development = true,
-}
+---@field update_channel string "stable" | "beta" | "development"
 
 local DEFAULTS = {
     disable_on_lock = false,
@@ -161,7 +157,7 @@ end
 
 function BluetoothSettings:getUpdateChannel()
     local channel = self.data.update_channel or DEFAULTS.update_channel
-    if not UPDATE_CHANNELS[channel] then
+    if not Version.isChannel(channel) then
         -- Guards against a corrupted/unknown value ending up on disk; falls
         -- back to stable rather than passing a bogus channel down into the
         -- updater/GitHub API.
@@ -170,9 +166,9 @@ function BluetoothSettings:getUpdateChannel()
     return channel
 end
 
----@param channel string "stable" | "development"
+---@param channel string "stable" | "beta" | "development"
 function BluetoothSettings:setUpdateChannel(channel)
-    if not UPDATE_CHANNELS[channel] then
+    if not Version.isChannel(channel) then
         logger:warn("Bluetooth Settings: ignoring unknown update channel", tostring(channel))
         return
     end

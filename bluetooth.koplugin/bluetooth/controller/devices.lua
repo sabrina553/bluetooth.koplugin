@@ -88,7 +88,7 @@ end
 local function pollField(self, field, expected, callback, attempt)
     attempt = attempt or 1
     local max_attempts = 10
-    local delay_s = 0.5
+    local delay_s = 1
 
     self:refresh()
 
@@ -98,7 +98,7 @@ local function pollField(self, field, expected, callback, attempt)
     end
 
     if attempt >= max_attempts then
-        logger.warn("Devices: could not confirm connection state for " .. tostring(self.mac))
+        logger.warn("Devices: could not confirm " .. field .. " state for " .. tostring(self.mac))
         if callback then callback(false) end
         return
     end
@@ -110,13 +110,13 @@ end
 
 function Devices:connect(callback)
     if not self.backend then
-        logger.warn("Devices:connect called with no backend set on device " .. tostring(self.mac))
+        logger.warn("Devices: connect called with no backend set on device " .. tostring(self.mac))
         if callback then callback(false) end
         return
     end
 
     if not self.controller then
-        logger.warn("Devices:connect called with no controller set on device " .. tostring(self.mac))
+        logger.warn("Devices: connect called with no controller set on device " .. tostring(self.mac))
         if callback then callback(false) end
         return
     end

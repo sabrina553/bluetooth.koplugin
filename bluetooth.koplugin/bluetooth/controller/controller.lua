@@ -177,6 +177,16 @@ function controller:reconnectOnWake()
     end
 end
 
+-- How long enable()/disable() wait before actually issuing the radio
+-- command. If a closely-spaced opposite call (e.g. resume right after
+-- suspend) supersedes this one within the window, the command is never
+-- sent at all - rather than sending "off" and "on" back-to-back straight
+-- to the daemon, which is what produced "No default controller available"
+-- on some devices. Adds a small, mostly-imperceptible delay to every
+-- deliberate single enable/disable too, which is the tradeoff for not
+-- sending contradictory commands to the radio in quick succession.
+local ENABLE_DISABLE_DEBOUNCE_S = 0.15
+
 ---@param expected boolean 
 ---@param callback fun(confirmed: boolean)|nil 
 ---@param attempt integer|nil internal, do not pass
@@ -195,7 +205,7 @@ local function pollField(self, field, expected, callback, attempt, generation)
 
     attempt = attempt or 1
     local max_attempts = 10
-    local delay_s = 0.5
+    local delay_s = 1
 
     self:status()
 
@@ -229,24 +239,38 @@ end
 
 function controller:enable(callback)
     logger.dbg("Enabling Bluetooth Controller")
-    -- Bumping the generation here - before callDeviceFunction/pollField even
-    -- start - immediately supersedes any disable()/enable() poll loop that
-    -- might still be running from an earlier, closely-spaced call (e.g.
-    -- suspend immediately followed by resume). Without this, both loops
-    -- would keep polling status() and firing os.execute('netagent bt
-    -- on/off') concurrently against the same underlying radio.
+    -- Bumping the generation here - before the debounced command even
+    -- fires - immediately supersedes any disable()/enable() call that
+    -- might still be pending or polling from an earlier, closely-spaced
+    -- call (e.g. suspend immediately followed by resume). Without this,
+    -- both could end up issuing os.execute('netagent bt on/off') and
+    -- polling status() concurrently against the same underlying radio.
     self._poll_generation = (self._poll_generation or 0) + 1
     local my_generation = self._poll_generation
-    self:callDeviceFunction("enable")
-    pollField(self, "is_enabled", true, callback, nil, my_generation)
+
+    UIManager:scheduleIn(ENABLE_DISABLE_DEBOUNCE_S, function()
+        if my_generation ~= self._poll_generation then
+            logger.dbg("Bluetooth: enable() superseded before its command was sent, skipping")
+            return
+        end
+        self:callDeviceFunction("enable")
+        pollField(self, "is_enabled", true, callback, nil, my_generation)
+    end)
 end
 
 function controller:disable(callback)
     logger.dbg("Disabling Bluetooth Controller")
     self._poll_generation = (self._poll_generation or 0) + 1
     local my_generation = self._poll_generation
-    self:callDeviceFunction("disable")
-    pollField(self, "is_enabled", false, callback, nil, my_generation)
+
+    UIManager:scheduleIn(ENABLE_DISABLE_DEBOUNCE_S, function()
+        if my_generation ~= self._poll_generation then
+            logger.dbg("Bluetooth: disable() superseded before its command was sent, skipping")
+            return
+        end
+        self:callDeviceFunction("disable")
+        pollField(self, "is_enabled", false, callback, nil, my_generation)
+    end)
 end
 
 function controller:toggle(callback)
@@ -261,14 +285,34 @@ end
 function controller:enableWhenDisabled(callback)
     self:status()
     if not self.is_enabled then
-        self:enable(callback)
+        return self:enable(callback)
     elseif callback then
-        callback(true)
+        -- Deferred to the next tick rather than called inline, so this
+        -- matches enable()'s async timing regardless of whether Bluetooth
+        -- happened to already be on - callers shouldn't have to care which
+        -- path fired to reason about ordering.
+        UIManager:scheduleIn(0, function() callback(true) end)
     end
 end
 
-function controller:knownDevices(callback)
+--- Refreshes self.known_devices from the backend.
+---
+--- Only PocketBook's netagent needs the radio actually on to answer a
+--- device query at all - other backends can just refresh directly. For
+--- PocketBook, if the radio is currently off, this enables it just long
+--- enough to read device info, then (by default) turns it back off again
+--- afterward, since being asked "what devices do you know about" shouldn't
+--- by itself leave the radio running.
+---
+---@param callback fun(confirmed: boolean)|nil invoked exactly once
+---@param opts table|nil { leave_enabled: boolean } - pass { leave_enabled =
+---  true } when the caller needs Bluetooth to stay on after this refresh
+---  completes (e.g. reconnectOnWake(), which needs to actually connect to
+---  devices right afterward - if this function turned the radio back off
+---  first, that connect would immediately fail).
+function controller:knownDevices(callback, opts)
     logger.dbg("Refreshing known devices")
+    opts = opts or {}
 
     local function refresh()
         self.known_devices = self:callDeviceFunction("knownDevices") or {}
@@ -278,24 +322,51 @@ function controller:knownDevices(callback)
         end
 
         self:applyStoredDeviceState()
+        return self.known_devices
+    end
 
+    if self.backend ~= backends.PocketBook then
+        refresh()
         if callback then callback(true) end
         return self.known_devices
     end
 
-    if self.backend == backends.PocketBook then
-        self:enableWhenDisabled(function(enabled_confirmed)
-            if not enabled_confirmed then
-                if callback then callback(false) end
-                return
-            end
-            refresh()
-        end)
-
+    self:status()
+    if self.is_enabled then
+        refresh()
+        if callback then callback(true) end
         return self.known_devices
     end
 
-    return refresh()
+    self:enable(function(enabled_confirmed)
+        if not enabled_confirmed then
+            if callback then callback(false) end
+            return
+        end
+
+        refresh()
+
+        if not opts.leave_enabled then
+            -- We were the one who turned it on just to read this. Its
+            -- confirmation is independent of whether the refresh itself
+            -- succeeded, so it must NOT invoke `callback` again below -
+            -- that already fired once, and calling it a second time
+            -- (possibly with a contradictory result) is exactly the bug
+            -- this replaced.
+            self:disable(function(disable_confirmed)
+                if not disable_confirmed then
+                    logger.warn("Bluetooth: could not confirm re-disable after a knownDevices()-triggered enable")
+                end
+            end)
+        end
+
+        if callback then callback(true) end
+    end)
+
+    -- Necessarily stale here - the enable/refresh/disable chain above is
+    -- still in flight. Callers that need the fresh list must use the
+    -- callback, not this return value.
+    return self.known_devices
 end
 
 function controller:search(callback, duration)
