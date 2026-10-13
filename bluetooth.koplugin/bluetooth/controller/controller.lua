@@ -155,10 +155,12 @@ function controller:snapshotBeforeSuspend(callback)
         return
     end
 
+    -- Blocking on purpose: the radio goes down right after this, and the
+    -- saved `connected` flags must come from a read that finished first.
     self:knownDevices(function()
         self:persistDeviceState()
         if callback then callback() end
-    end)
+    end, { blocking = true })
 end
 
 --- Call after bluetooth's been re-enabled and known_devices refreshed on
@@ -425,76 +427,57 @@ function controller:devicesFromStore()
     return list
 end
 
---- Refreshes self.known_devices. A read never changes the radio's power:
---- on PocketBook with the radio off it serves the cached list instead.
---- Explicit actions (connect, pair, scan) enable the radio themselves.
----
----@param callback fun(confirmed: boolean)|nil invoked exactly once
-function controller:knownDevices(callback)
-    logger.dbg("Refreshing known devices")
+--- Takes a finished read (nil = the backend could not read) and updates
+--- known_devices, the saved state and the logs. Shared by the blocking and
+--- the background read.
+---@param live table|nil
+function controller:applyRead(live)
+    local started = now()
+    local previous = {}
+    for _, dev in ipairs(self.known_devices or {}) do
+        previous[dev.mac] = dev
+    end
 
-    local function refresh()
-        local started = now()
-        local previous = {}
-        for _, dev in ipairs(self.known_devices or {}) do
-            previous[dev.mac] = dev
+    if live == nil then
+        -- The backend could not read (timed out), which is not the same
+        -- as "no devices": keep what we had.
+        self._read_failed = true
+        live = {}
+    else
+        self._read_failed = false
+    end
+    self.known_devices = live
+
+    local queried = 0
+    for _, dev in ipairs(self.known_devices) do
+        -- Backends mark devices whose state they already know (unpaired
+        -- scan results) so we don't spawn a process for each one.
+        if not dev.skip_info then
+            dev:refresh()
+            queried = queried + 1
         end
+    end
 
-        local live = self:callDeviceFunction("knownDevices")
-        if live == nil then
-            -- The backend could not read (timed out), which is not the same
-            -- as "no devices": keep what we had.
-            self._read_failed = true
-            live = {}
-        else
-            self._read_failed = false
-        end
-        self.known_devices = live
-
-        local queried = 0
-        for _, dev in ipairs(self.known_devices) do
-            -- Backends mark devices whose state they already know (unpaired
-            -- scan results) so we don't spawn a process for each one.
-            if not dev.skip_info then
-                dev:refresh()
-                queried = queried + 1
-            end
-        end
-
-        -- Devices are rebuilt on every refresh, so changes show up as a
-        -- difference from the previous list. This is what shows a device
-        -- reconnecting by itself, see the 2026-10-13 session note.
-        for _, dev in ipairs(self.known_devices) do
-            local before = previous[dev.mac]
-            if before then
-                for _, field in ipairs({ "connected", "paired", "trusted", "blocked" }) do
-                    if before[field] ~= dev[field] then
-                        logger.info("Bluetooth: " .. field .. " of " .. Parse.maskMac(dev.mac) ..
-                            " changed " .. tostring(before[field]) .. " -> " .. tostring(dev[field]))
-                    end
+    -- Devices are rebuilt on every refresh, so changes show up as a
+    -- difference from the previous list. This is what shows a device
+    -- reconnecting by itself, see the 2026-10-13 session note.
+    for _, dev in ipairs(self.known_devices) do
+        local before = previous[dev.mac]
+        if before then
+            for _, field in ipairs({ "connected", "paired", "trusted", "blocked" }) do
+                if before[field] ~= dev[field] then
+                    logger.info("Bluetooth: " .. field .. " of " .. Parse.maskMac(dev.mac) ..
+                        " changed " .. tostring(before[field]) .. " -> " .. tostring(dev[field]))
                 end
             end
         end
-
-        logger.dbg(string.format("Bluetooth: refreshed %d devices (%d queried) in %.2fs",
-            #self.known_devices, queried, now() - started))
-
-        self:applyStoredDeviceState()
-        return self.known_devices
     end
 
-    if self.backend == backends.PocketBook then
-        self:status()
-        if not self.is_enabled or self:isDisabling() then
-            self.known_devices = self:devicesFromStore()
-            self:applyStoredDeviceState()
-            logger.dbg(string.format("Bluetooth: radio off or going off, using %d cached devices", #self.known_devices))
-            if callback then callback(true) end
-            return self.known_devices
-        end
-    end
+    logger.dbg(string.format("Bluetooth: refreshed %d devices (%d queried) in %.2fs",
+        #self.known_devices, queried, now() - started))
 
-    refresh()
+    self:applyStoredDeviceState()
+
     -- A failed or empty live read can happen while bluetoothd restarts after
     -- a quick suspend/resume (0 devices at 12:55:28 on 2026-10-13, two
     -- timed-out reads at 13:25:07). Saving that wiped every starred and
@@ -508,11 +491,66 @@ function controller:knownDevices(callback)
         logger.warn("Bluetooth: live read returned no devices, keeping the saved ones")
         self.known_devices = self:devicesFromStore()
         self:applyStoredDeviceState()
-        if callback then callback(true) end
-        return self.known_devices
+        return
     end
     -- Keep the cache current for the radio-off case, not just at suspend.
     self:persistDeviceState()
+end
+
+--- Refreshes self.known_devices. A read never changes the radio's power:
+--- on PocketBook with the radio off it serves the cached list instead.
+--- Explicit actions (connect, pair, scan) enable the radio themselves.
+---
+--- With a backend that has `readSnapshot` the read runs in the background:
+--- this returns the current list at once and the callback fires when the
+--- result has been applied. A result that arrives after enable()/disable()
+--- is dropped (callback false), as the radio it describes is gone. Reads
+--- requested meanwhile share the one in flight. `opts.blocking` forces the
+--- old blocking read, kept for suspend where the callback must finish before
+--- the radio goes down.
+---
+---@param callback fun(confirmed: boolean)|nil invoked exactly once
+---@param opts {blocking: boolean}|nil
+function controller:knownDevices(callback, opts)
+    logger.dbg("Refreshing known devices")
+
+    if self.backend == backends.PocketBook then
+        self:status()
+        if not self.is_enabled or self:isDisabling() then
+            self.known_devices = self:devicesFromStore()
+            self:applyStoredDeviceState()
+            logger.dbg(string.format("Bluetooth: radio off or going off, using %d cached devices", #self.known_devices))
+            if callback then callback(true) end
+            return self.known_devices
+        end
+    end
+
+    if self.backend and self.backend.readSnapshot and not (opts and opts.blocking) then
+        self._read_waiters = self._read_waiters or {}
+        if callback then table.insert(self._read_waiters, callback) end
+        if self._reading then
+            return self.known_devices or {}
+        end
+        self._reading = true
+        local generation = self._poll_generation
+        local started = now()
+        self.backend:readSnapshot(function(live)
+            self._reading = false
+            local waiters = self._read_waiters
+            self._read_waiters = {}
+            local fresh = generation == self._poll_generation
+            if fresh then
+                logger.dbg(string.format("Bluetooth: background read took %.2fs", now() - started))
+                self:applyRead(live)
+            else
+                logger.dbg("Bluetooth: radio changed during a background read, dropping it")
+            end
+            for _, waiter in ipairs(waiters) do waiter(fresh) end
+        end)
+        return self.known_devices or {}
+    end
+
+    self:applyRead(self:callDeviceFunction("knownDevices"))
     if callback then callback(true) end
     return self.known_devices
 end
