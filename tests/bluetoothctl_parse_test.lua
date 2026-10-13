@@ -27,6 +27,8 @@ check("a different dashed MAC is a real name", name, "00-11-22-aa-bb-cc")
 
 check("not a device line", Parse.deviceLine("[CHG] Controller 00:11:22:33:44:55 Powered: yes"), nil)
 check("empty line", Parse.deviceLine(""), nil)
+check("scan notice is not a device", Parse.deviceLine("[CHG] Device 00:11:22:33:44:55 AdvertisingFlags:"), nil)
+check("coloured scan notice is not a device", Parse.deviceLine("\27[0;92mNEW\27[0m] Device 00:11:22:33:44:55 Test Pager"), nil)
 
 -- bluetoothctl info
 local CONNECTED = table.concat({
@@ -98,6 +100,30 @@ check("Name is the fallback", Parse.info(NAME_ONLY).name, "Factory Name")
 check("no name at all", Parse.info("Device 00:11:22:33:44:55 (public)\n\tPaired: no\n").name, nil)
 
 check("a dashed-MAC alias means unnamed", Parse.info(DISCOVERED).name, nil)
+
+-- listings
+local listing = Parse.deviceList(table.concat({
+    "Device 00:11:22:33:44:55 Test Pager",
+    "[CHG] Controller 00:11:22:33:44:55 Powered: yes",
+    "Device 66:77:88:99:AA:BB 66-77-88-99-AA-BB",
+    "",
+}, "\n"))
+check("listing skips non-device lines", #listing, 2)
+check("listing keeps names", listing[1].name, "Test Pager")
+check("listing maps dashed MAC to Unknown", listing[2].name, "Unknown")
+check("empty listing", #Parse.deviceList(""), 0)
+check("nil listing", #Parse.deviceList(nil), 0)
+
+-- logging helper
+check("mask keeps the last two bytes", Parse.maskMac("00:11:22:33:44:55"), "XX:XX:XX:XX:44:55")
+check("mask passes nil through as text", Parse.maskMac(nil), "nil")
+check("mask passes other text through", Parse.maskMac("not a mac"), "not a mac")
+
+-- command support differs between BlueZ versions
+check("5.52 rejects 'devices Paired'", Parse.isUnsupportedCommand("\27[1;39mToo many arguments\27[0m\n"), true)
+check("newer BlueZ rejects 'paired-devices'", Parse.isUnsupportedCommand("Invalid command in menu main: paired-devices\n"), true)
+check("an empty listing is not an error", Parse.isUnsupportedCommand(""), false)
+check("a real listing is not an error", Parse.isUnsupportedCommand("Device 00:11:22:33:44:55 Test Pager\n"), false)
 
 if failures > 0 then
     print(failures .. " failure(s)")

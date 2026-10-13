@@ -421,17 +421,38 @@ function BluetoothMenu:showSearchResults(on_refresh)
     }
     UIManager:show(self.search_menu)
 
-    local elapsed = 0
+    -- Wall-clock deadline: counting polls let slow refreshes stretch a
+    -- 15 s scan to almost a minute, see the on-device log from 2026-10-13.
+    local started = os.time()
+    local deadline = started + scan_duration
+    local known_before = {}
+    for _, dev in ipairs(self.controller.known_devices or {}) do
+        known_before[dev.mac] = true
+    end
     local function poll()
         if self.search_menu_closed then
             return
         end
-        elapsed = elapsed + poll_interval
         self.controller:knownDevices() -- re-shells bluetoothctl devices + refreshes each dev
-        local done = elapsed >= scan_duration
-        self.search_menu:switchItemTable(
+        local done = os.time() >= deadline
+        if done then
+            local found, new = 0, 0
+            for _, dev in ipairs(self.controller.known_devices or {}) do
+                found = found + 1
+                if not known_before[dev.mac] then new = new + 1 end
+            end
+            logger.info(string.format("Bluetooth: scan finished after %ds, %d devices known, %d new",
+                os.time() - started, found, new))
+        end
+        -- Without an item number switchItemTable jumps back to page 1, which
+        -- made later pages unreachable while scanning. Passing the first item
+        -- of the current page keeps it (KOReader clamps it if the list shrinks).
+        local menu = self.search_menu
+        local first_on_page = ((menu.page or 1) - 1) * (menu.perpage or 1) + 1
+        menu:switchItemTable(
             done and _("Search complete") or _("Searching for devices…"),
-            buildItemTable(self.controller.known_devices)
+            buildItemTable(self.controller.known_devices),
+            first_on_page
         )
         if not done then
             UIManager:scheduleIn(poll_interval, poll)
