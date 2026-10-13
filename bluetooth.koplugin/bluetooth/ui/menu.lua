@@ -360,6 +360,17 @@ function BluetoothMenu:getUpdateChannelMenu()
             keep_menu_open = true,
         },
         {
+            text = _("Beta"),
+            checked_func = function()
+                return self.settings:getUpdateChannel() == "beta"
+            end,
+            radio = true,
+            callback = function(touchmenu_instance)
+                self:setUpdateChannel("beta", touchmenu_instance)
+            end,
+            keep_menu_open = true,
+        },
+        {
             text = _("Development"),
             checked_func = function()
                 return self.settings:getUpdateChannel() == "development"
