@@ -89,7 +89,7 @@ function bluez:disable()
 end
 
 function bluez:pair(mac)
-    logger.dbg("Bluez: Pairing with Bluetooth device: " .. mac)
+    logger.dbg("Bluez: Pairing with Bluetooth device: " .. Parse.maskMac(mac))
     run('bluetoothctl pair ' .. mac)
     -- os.execute(string.format(
     --     'echo -e "agent NoInputNoOutput\\ndefault-agent\\npair %s\\nquit\\n" | bluetoothctl &', -- maybe worth repeating this for other commands
@@ -98,37 +98,37 @@ function bluez:pair(mac)
 end
 
 function bluez:unpair(mac)
-    logger.dbg("Bluez: Unpairing with Bluetooth device: " .. mac)
+    logger.dbg("Bluez: Unpairing with Bluetooth device: " .. Parse.maskMac(mac))
     run('bluetoothctl remove ' .. mac)
 end
 
 function bluez:connect(mac)
-    logger.dbg("Bluez: Connecting to Bluetooth device: " .. mac)
+    logger.dbg("Bluez: Connecting to Bluetooth device: " .. Parse.maskMac(mac))
     run('bluetoothctl connect ' .. mac) -- launch, don't wait
 end
 
 function bluez:disconnect(mac)
-    logger.dbg("Bluez: Disconnecting from Bluetooth device: " .. mac)
+    logger.dbg("Bluez: Disconnecting from Bluetooth device: " .. Parse.maskMac(mac))
     run('bluetoothctl disconnect ' .. mac)
 end
 
 function bluez:trust(mac)
-    logger.dbg("Bluez: Trusting Bluetooth device: " .. mac)
+    logger.dbg("Bluez: Trusting Bluetooth device: " .. Parse.maskMac(mac))
     run('bluetoothctl trust ' .. mac)
 end
 
 function bluez:untrust(mac)
-    logger.dbg("Bluez: Untrusting Bluetooth device: " .. mac)
+    logger.dbg("Bluez: Untrusting Bluetooth device: " .. Parse.maskMac(mac))
     run('bluetoothctl untrust ' .. mac)
 end
 
 function bluez:block(mac)
-    logger.dbg("Bluez: Blocking Bluetooth device: " .. mac)
+    logger.dbg("Bluez: Blocking Bluetooth device: " .. Parse.maskMac(mac))
     run('bluetoothctl block ' .. mac)
 end
 
 function bluez:unblock(mac)
-    logger.dbg("Bluez: Unblocking Bluetooth device: " .. mac)
+    logger.dbg("Bluez: Unblocking Bluetooth device: " .. Parse.maskMac(mac))
     run('bluetoothctl unblock ' .. mac)
 end
 

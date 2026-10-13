@@ -7,6 +7,13 @@ local _ = require("gettext")
 local BackendSelect = require("bluetooth/controller/backend_select")
 local PocketBook = require("bluetooth/controller/pocketbook")
 local Bluez = require("bluetooth/controller/bluez")
+local Parse = require("bluetooth/controller/bluetoothctl_parse")
+
+-- Sub-second clock for timing logs; os.time is only whole seconds.
+local socket_ok, socket = pcall(require, "socket")
+local function now()
+    return socket_ok and socket.gettime() or os.time()
+end
 
 ---@class controller
 ---@field type string
@@ -71,7 +78,7 @@ end
 ---@param mac string
 ---@return Devices|nil
 function controller:getDevice(mac)
-    logger.dbg("Looking up known device by MAC: " .. mac)
+    logger.dbg("Looking up known device by MAC: " .. Parse.maskMac(mac))
     if not self.known_devices then
         return nil
     end
@@ -161,10 +168,10 @@ function controller:reconnectOnWake()
     for mac in pairs(wanted_macs) do
         local dev = self:getDevice(mac)
         if dev then
-            logger.dbg("Bluetooth: reconnecting to " .. mac .. " on wake")
+            logger.dbg("Bluetooth: reconnecting to " .. Parse.maskMac(mac) .. " on wake")
             dev:connect()
         else
-            logger.warn("Bluetooth: stored device " .. mac .. " not found among known_devices, skipping wake reconnect")
+            logger.warn("Bluetooth: stored device " .. Parse.maskMac(mac) .. " not found among known_devices, skipping wake reconnect")
         end
     end
 end
@@ -307,15 +314,41 @@ function controller:knownDevices(callback, opts)
     opts = opts or {}
 
     local function refresh()
+        local started = now()
+        local previous = {}
+        for _, dev in ipairs(self.known_devices or {}) do
+            previous[dev.mac] = dev
+        end
+
         self.known_devices = self:callDeviceFunction("knownDevices") or {}
 
+        local queried = 0
         for _, dev in ipairs(self.known_devices) do
             -- Backends mark devices whose state they already know (unpaired
             -- scan results) so we don't spawn a process for each one.
             if not dev.skip_info then
                 dev:refresh()
+                queried = queried + 1
             end
         end
+
+        -- Devices are rebuilt on every refresh, so changes show up as a
+        -- difference from the previous list. This is what shows a device
+        -- reconnecting by itself, see the 2026-10-13 session note.
+        for _, dev in ipairs(self.known_devices) do
+            local before = previous[dev.mac]
+            if before then
+                for _, field in ipairs({ "connected", "paired", "trusted", "blocked" }) do
+                    if before[field] ~= dev[field] then
+                        logger.info("Bluetooth: " .. field .. " of " .. Parse.maskMac(dev.mac) ..
+                            " changed " .. tostring(before[field]) .. " -> " .. tostring(dev[field]))
+                    end
+                end
+            end
+        end
+
+        logger.dbg(string.format("Bluetooth: refreshed %d devices (%d queried) in %.2fs",
+            #self.known_devices, queried, now() - started))
 
         self:applyStoredDeviceState()
         return self.known_devices
@@ -379,7 +412,7 @@ end
 
 ---@param mac string
 function controller:info(mac)
-    logger.dbg("Fetching info for device with MAC: " .. tostring(mac))
+    logger.dbg("Fetching info for device with MAC: " .. Parse.maskMac(mac))
     return self:callDeviceFunction("info", mac)
 end
 

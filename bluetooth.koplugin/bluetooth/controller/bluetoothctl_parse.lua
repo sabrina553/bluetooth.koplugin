@@ -23,6 +23,16 @@ function Parse.deviceLine(line)
     return mac, name
 end
 
+--- A MAC address reduced to its last two bytes, for logs: the reader's
+--- crash.log is shared when people ask for help, and full addresses identify
+--- devices. Anything that isn't a MAC is passed through as text.
+---@param mac any
+---@return string
+function Parse.maskMac(mac)
+    local tail = type(mac) == "string" and mac:match("%x%x:%x%x:%x%x:%x%x:(%x%x:%x%x)$")
+    return tail and ("XX:XX:XX:XX:" .. tail) or tostring(mac)
+end
+
 --- Every device line of a listing, such as `bluetoothctl devices` or its
 --- paired variant. Lines that aren't devices (errors, notices) are skipped.
 ---@param output string

@@ -60,7 +60,7 @@ end
 
 function Devices:refresh()
     if not self.backend or not self.backend.info then
-        logger.warn("Devices:refresh called with no backend set on device " .. tostring(self.mac))
+        logger.warn("Devices:refresh called with no backend set on device " .. Parse.maskMac(self.mac))
         return self
     end
 
@@ -84,12 +84,14 @@ local function pollField(self, field, expected, callback, attempt)
     self:refresh()
 
     if self[field] == expected then
+        logger.dbg("Devices: " .. field .. " of " .. Parse.maskMac(self.mac) ..
+            " is " .. tostring(expected) .. " after " .. attempt .. " check(s)")
         if callback then callback(true) end
         return
     end
 
     if attempt >= max_attempts then
-        logger.warn("Devices: could not confirm " .. field .. " state for " .. tostring(self.mac))
+        logger.warn("Devices: could not confirm " .. field .. " state for " .. Parse.maskMac(self.mac))
         if callback then callback(false) end
         return
     end
@@ -101,13 +103,13 @@ end
 
 function Devices:connect(callback)
     if not self.backend then
-        logger.warn("Devices: connect called with no backend set on device " .. tostring(self.mac))
+        logger.warn("Devices: connect called with no backend set on device " .. Parse.maskMac(self.mac))
         if callback then callback(false) end
         return
     end
 
     if not self.controller then
-        logger.warn("Devices: connect called with no controller set on device " .. tostring(self.mac))
+        logger.warn("Devices: connect called with no controller set on device " .. Parse.maskMac(self.mac))
         if callback then callback(false) end
         return
     end
@@ -125,7 +127,7 @@ end
 
 function Devices:disconnect(callback)
     if not self.backend then
-        logger.warn("Devices:disconnect called with no backend set on device " .. tostring(self.mac))
+        logger.warn("Devices:disconnect called with no backend set on device " .. Parse.maskMac(self.mac))
         if callback then callback(false) end
         return
     end
@@ -148,7 +150,7 @@ end
 
 function Devices:pair(callback)
     if not self.backend then
-        logger.warn("Devices:pair called with no backend set on device " .. tostring(self.mac))
+        logger.warn("Devices:pair called with no backend set on device " .. Parse.maskMac(self.mac))
         if callback then callback(false) end
         return
     end
@@ -157,7 +159,7 @@ function Devices:pair(callback)
         return
     end
     if not self.controller then
-        logger.warn("Devices:pair called with no controller set on device " .. tostring(self.mac))
+        logger.warn("Devices:pair called with no controller set on device " .. Parse.maskMac(self.mac))
         if callback then callback(false) end
         return
     end
@@ -186,7 +188,7 @@ end
 
 function Devices:unpair(callback)
     if not self.backend then
-        logger.warn("Devices:unpair called with no backend set on device " .. tostring(self.mac))
+        logger.warn("Devices:unpair called with no backend set on device " .. Parse.maskMac(self.mac))
         if callback then callback(false) end
         return
     end
@@ -210,7 +212,7 @@ end
 
 function Devices:trust(callback)
     if not self.backend then
-        logger.warn("Devices:trust called with no backend set on device " .. tostring(self.mac))
+        logger.warn("Devices:trust called with no backend set on device " .. Parse.maskMac(self.mac))
         if callback then callback(false) end
         return
     end
@@ -225,7 +227,7 @@ end
 
 function Devices:untrust(callback)
     if not self.backend then
-        logger.warn("Devices:unpair called with no backend set on device " .. tostring(self.mac))
+        logger.warn("Devices:unpair called with no backend set on device " .. Parse.maskMac(self.mac))
         if callback then callback(false) end
         return
     end
@@ -249,7 +251,7 @@ end
 
 function Devices:block(callback)
     if not self.backend then
-        logger.warn("Devices:block called with no backend set on device " .. tostring(self.mac))
+        logger.warn("Devices:block called with no backend set on device " .. Parse.maskMac(self.mac))
         if callback then callback(false) end
         return
     end
@@ -264,7 +266,7 @@ end
 
 function Devices:unblock(callback)
     if not self.backend then
-        logger.warn("Devices:unblock called with no backend set on device " .. tostring(self.mac))
+        logger.warn("Devices:unblock called with no backend set on device " .. Parse.maskMac(self.mac))
         if callback then callback(false) end
         return
     end
@@ -291,7 +293,7 @@ end
 --- it never affects any other device's starred state.
 function Devices:setStarred(starred, callback)
     if not self.controller then
-        logger.warn("Devices:setStarred called with no controller set on device " .. tostring(self.mac))
+        logger.warn("Devices:setStarred called with no controller set on device " .. Parse.maskMac(self.mac))
         if callback then callback(false) end
         return
     end
