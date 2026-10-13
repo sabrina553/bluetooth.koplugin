@@ -294,7 +294,7 @@ function BluetoothMenu:startPolling()
             return
         end
         -- The scan screen polls the list itself.
-        if self.search_menu_closed ~= false then
+        if not self._scan_token then
             self.controller:statusCached(function()
                 UIManager:nextTick(function()
                     if self._poll_token == token then self:refresh() end
@@ -508,7 +508,10 @@ function BluetoothMenu:showSearchResults(on_refresh)
     local poll_interval = 1
 
     self.controller:search(on_refresh, scan_duration)
-    self.search_menu_closed = false
+    -- Per-scan token: a late poll from an earlier scan sees a different token
+    -- and stops, instead of reviving next to the new one (as startPolling does).
+    local token = {}
+    self._scan_token = token
 
     self.search_menu = Menu:new{
         title = _("Searching for devices…"),
@@ -517,7 +520,7 @@ function BluetoothMenu:showSearchResults(on_refresh)
             self:pairFoundDevice(item.dev, on_refresh)
         end,
         close_callback = function()
-            self.search_menu_closed = true
+            if self._scan_token == token then self._scan_token = nil end
             UIManager:close(self.search_menu)
         end,
     }
@@ -532,13 +535,13 @@ function BluetoothMenu:showSearchResults(on_refresh)
         known_before[dev.mac] = true
     end
     local function poll()
-        if self.search_menu_closed then
+        if self._scan_token ~= token then
             return
         end
         -- The read runs in the background; the next poll is scheduled once
         -- its result is in, so slow reads never stack up.
         self.controller:knownDevices(function()
-            if self.search_menu_closed then
+            if self._scan_token ~= token then
                 return
             end
             local done = os.time() >= deadline
