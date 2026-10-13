@@ -440,7 +440,16 @@ function controller:knownDevices(callback)
             previous[dev.mac] = dev
         end
 
-        self.known_devices = self:callDeviceFunction("knownDevices") or {}
+        local live = self:callDeviceFunction("knownDevices")
+        if live == nil then
+            -- The backend could not read (timed out), which is not the same
+            -- as "no devices": keep what we had.
+            self._read_failed = true
+            live = {}
+        else
+            self._read_failed = false
+        end
+        self.known_devices = live
 
         local queried = 0
         for _, dev in ipairs(self.known_devices) do
@@ -486,6 +495,22 @@ function controller:knownDevices(callback)
     end
 
     refresh()
+    -- A failed or empty live read can happen while bluetoothd restarts after
+    -- a quick suspend/resume (0 devices at 12:55:28 on 2026-10-13, two
+    -- timed-out reads at 13:25:07). Saving that wiped every starred and
+    -- connected flag, so wake had nothing to reconnect. Never replace a
+    -- populated store with it. Trade-off: if BlueZ really has no devices
+    -- left, the stale entries stay until a non-empty read; accepted because
+    -- BlueZ keeps scan results, so a truly empty list is very rare.
+    local store_has_devices = self.device_store and self.device_store.data
+        and next(self.device_store.data) ~= nil
+    if (self._read_failed or #self.known_devices == 0) and store_has_devices then
+        logger.warn("Bluetooth: live read returned no devices, keeping the saved ones")
+        self.known_devices = self:devicesFromStore()
+        self:applyStoredDeviceState()
+        if callback then callback(true) end
+        return self.known_devices
+    end
     -- Keep the cache current for the radio-off case, not just at suspend.
     self:persistDeviceState()
     if callback then callback(true) end

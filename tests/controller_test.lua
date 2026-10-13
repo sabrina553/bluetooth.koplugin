@@ -213,5 +213,18 @@ do
     drain()
 end
 
+-- A failed or empty live read over a populated store is never saved: the
+-- cached devices are served and starred stays.
+do
+    local c, calls = build(true, { ["AA:AA"] = { mac = "AA:AA", name = "Keyboard", paired = true, starred = true } })
+    for _, read in ipairs({ function() return {} end, function() return nil end }) do
+        fake.knownDevices = read
+        calls.saved = nil
+        local list = c:knownDevices()
+        check(#list == 1 and list[1].starred == true, "failed read: cached device served with starred kept")
+        check(not calls.saved, "failed read: store not rewritten")
+    end
+end
+
 if failures > 0 then os.exit(1) end
 print("controller_test: ok")
