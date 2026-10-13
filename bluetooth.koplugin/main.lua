@@ -16,6 +16,7 @@ end
 local BluetoothMenu = require("bluetooth/ui/menu")
 local controller = require("bluetooth/controller/controller")
 local BluetoothSettings = require("bluetooth/settings")
+local Session = require("bluetooth/session")
 local BluetoothDeviceStore = require("bluetooth/devicestore")
 local GithubAPI = require("bluetooth/ota/github_api")
 local BluetoothSelfUpdater = require("bluetooth/ota/self_updater")
@@ -58,7 +59,12 @@ function Bluetooth:init()
 
     self.ui.menu:registerToMainMenu(self.menu)
 
-    self:restoreBluetoothState()
+    -- init also runs on every view change (file manager <-> book), where
+    -- nothing woke up: restoring then switched Bluetooth back on after the
+    -- user had turned it off. Wake-ups are handled by onResume.
+    if Session.isColdStart() then
+        self:restoreBluetoothState()
+    end
 
     logger.dbg("Bluetooth.koplugin: Initialized")
 end

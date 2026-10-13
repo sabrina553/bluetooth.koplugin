@@ -55,8 +55,13 @@ function controller:init()
         self.backend.controller = self
     end
 
+    -- Only read devices when the radio is already on: on PocketBook a read
+    -- powers the radio on and off again, which flickered it on every view
+    -- change. The menu refreshes when it is opened.
     self:status()
-    self:knownDevices()
+    if self.is_enabled then
+        self:knownDevices()
+    end
 
     logger.dbg("Bluetooth.koplugin.Controller Initialized")
 end
