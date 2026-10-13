@@ -395,11 +395,10 @@ function BluetoothMenu:setUpdateChannel(channel, touchmenu_instance)
     self.settings:setUpdateChannel(channel)
     UIManager:broadcastEvent(Event:new("BluetoothSettingsChanged"))
 
-    local close_message = self:toast(_("Checking for updates…"), 0)
-    self.updater:fetchLatestVersion()
-    pcall(close_message)
+    self:checkForUpdates()
 
-    self:refresh(touchmenu_instance)
+    -- Only redraw the current list; refresh() would swap in the top-level menu.
+    touchmenu_instance:updateItems()
 end
 
 function BluetoothMenu:showSearchResults(on_refresh)
@@ -593,10 +592,11 @@ end
 
 function BluetoothMenu:showPluginUpdateCheck(skip_version_check)
     if not skip_version_check then
-        -- Refresh the latest version on open.
-        local close_message = self:toast(_("Checking for Updates"), 0)
-        self.updater:fetchLatestVersion()
-        pcall(close_message)
+        -- Refresh the latest version on open. A failed check must not be
+        -- reported as "up to date".
+        if not self:checkForUpdates() then
+            return
+        end
     end
 
     local dialog
@@ -628,9 +628,8 @@ function BluetoothMenu:showPluginUpdateCheck(skip_version_check)
                 {
                     text = _("Check for Updates"),
                     callback = function()
-                        self.updater:fetchLatestVersion()
                         UIManager:close(dialog)
-                        self:showPluginUpdateCheck(true)
+                        self:showPluginUpdateCheck()
                     end,
                 },
             },
@@ -648,6 +647,20 @@ function BluetoothMenu:showPluginUpdateCheck(skip_version_check)
     UIManager:show(dialog)
 end
 
+--- Asks GitHub for the latest release on the selected channel, with a
+--- toast while it blocks. On failure shows why and returns false.
+---@return boolean ok
+function BluetoothMenu:checkForUpdates()
+    local close_message = self:toast(_("Checking for updates…"), 0)
+    local ok, err = self.updater:fetchLatestVersion()
+    pcall(close_message)
+
+    if not ok then
+        self:toast(T(_("Could not check for updates: %1"), tostring(err)), 3)
+    end
+    return ok
+end
+
 --- Actually performs the update: downloads the release asset, verifies it,
 --- and extracts it into place, using self.updater:update()'s progress
 --- callback to keep a single persistent toast up to date. This was
@@ -659,7 +672,7 @@ function BluetoothMenu:showPluginUpdater()
 
     self.updater:update(function(stage, percent, message)
         if stage == "download" then
-            self:toast(T(_("Downloading update… %1%%"), percent or 0), 0)
+            self:toast(T(_("Downloading update… %1%"), percent or 0), 0)
         elseif stage == "complete" then
             if self.info_message then
                 UIManager:close(self.info_message)
@@ -691,6 +704,8 @@ function BluetoothMenu:toast(text, timeout)
     })
 
     UIManager:show(info_message)
+    -- Callers go on to block (network, downloads), so paint it now or it never shows.
+    UIManager:forceRePaint()
     self.info_message = info_message
 
     return function() UIManager:close(info_message) end

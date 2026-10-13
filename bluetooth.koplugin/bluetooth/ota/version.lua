@@ -117,4 +117,39 @@ function Version.channelAccepts(channel, version)
     return parsed.label == nil or labels[parsed.label] == true
 end
 
+--- Highest release version the channel accepts. Chosen by version, not by
+--- GitHub's list order, so publishing an older hotfix after a newer
+--- pre-release can't make it look like the latest.
+---
+--- Releases without an asset matching `asset_pattern` are skipped: CI attaches
+--- the zip after the release is published, so there is a window where a
+--- release exists but can't be installed.
+---@param releases table[] GitHub release objects
+---@param channel string
+---@param asset_pattern string Lua pattern the zip's name must match
+---@return string|nil
+function Version.pickLatest(releases, channel, asset_pattern)
+    local latest = nil
+    for _, release in ipairs(releases) do
+        local version = release.tag_name
+        -- A release marked pre-release on GitHub never reaches stable,
+        -- whatever its tag says.
+        local allowed = Version.channelAccepts(channel, version)
+            and not (channel == "stable" and release.prerelease)
+
+        local has_asset = false
+        for _, asset in ipairs(type(release.assets) == "table" and release.assets or {}) do
+            if type(asset.name) == "string" and asset.name:match(asset_pattern) then
+                has_asset = true
+                break
+            end
+        end
+
+        if allowed and has_asset and (latest == nil or Version.isNewer(latest, version)) then
+            latest = version
+        end
+    end
+    return latest
+end
+
 return Version
