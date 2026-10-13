@@ -277,6 +277,10 @@ function bluez:knownDevices()
 end
 
 local SNAPSHOT_TIMEOUT_S = 20
+-- First check soon, then back off: a D-Bus read finishes in about 5 ms but
+-- waited a full 0.2 s to be picked up (0.23 s against 0.42 s for
+-- bluetoothctl on the reader, 2026-10-13). Slow reads cost a few more checks.
+local SNAPSHOT_POLL_FIRST_S = 0.05
 local SNAPSHOT_POLL_S = 0.2
 local snapshot_counter = 0
 
@@ -331,6 +335,7 @@ function bluez.runAsync(script, done)
     local function cleanup()
         os.remove(base); os.remove(script_path); os.remove(out_path)
     end
+    local delay = SNAPSHOT_POLL_FIRST_S
     local function poll()
         local out = io.open(out_path, "r")
         if out then
@@ -343,9 +348,10 @@ function bluez.runAsync(script, done)
             cleanup()
             return done(nil)
         end
-        UIManager:scheduleIn(SNAPSHOT_POLL_S, poll)
+        delay = math.min(delay * 2, SNAPSHOT_POLL_S)
+        UIManager:scheduleIn(delay, poll)
     end
-    UIManager:scheduleIn(SNAPSHOT_POLL_S, poll)
+    UIManager:scheduleIn(delay, poll)
 end
 
 --- Devices from the output of snapshotScript, or nil if the read failed
