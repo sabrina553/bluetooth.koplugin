@@ -34,6 +34,7 @@ m	disconnect		        Disconnect a device or optionally disconnect a single prof
 local _ = require("gettext")
 local logger = require("logger")
 local Devices = require("bluetooth/controller/devices")
+local Parse = require("bluetooth/controller/bluetoothctl_parse")
 
 local bluez = {}
 
@@ -112,17 +113,6 @@ function bluez:unblock(mac)
     os.execute('bluetoothctl unblock ' .. mac .. ' &')
 end
 
-local function parseDeviceLine(line)
-    local mac, rest = string.match(line, "Device (%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)%s+(.*)")
-    if not mac then
-        return nil
-    end
-    rest = rest and rest:gsub("^%s+", ""):gsub("%s+$", "") or ""
-    local dashMac = mac:gsub(":", "-")
-    local name = (rest == "" or rest:upper() == dashMac:upper()) and "Unknown" or rest
-    return mac, name
-end
-
 function bluez:knownDevices()
     local handle = io.popen("bluetoothctl devices")
     local output = handle:read("*a")
@@ -130,7 +120,7 @@ function bluez:knownDevices()
 
     local devices = {}
     for line in string.gmatch(output, "[^\r\n]+") do
-        local mac, name = parseDeviceLine(line)
+        local mac, name = Parse.deviceLine(line)
         if mac then
             table.insert(devices, Devices:fromScan(mac, name, self, self.controller))
         end

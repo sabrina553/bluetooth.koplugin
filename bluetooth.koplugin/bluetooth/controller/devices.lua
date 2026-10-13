@@ -1,6 +1,8 @@
 local logger = require("logger")
 local UIManager = require("ui/uimanager")
 
+local Parse = require("bluetooth/controller/bluetoothctl_parse")
+
 ---@class Devices
 ---@field mac string
 ---@field name string
@@ -46,24 +48,14 @@ function Devices:fromScan(mac, name, backend, ctrl)
 end
 
 function Devices:parseInfo(output)
-    self.mac = output:match("Device (%w+:%w+:%w+:%w+:%w+:%w+)") or self.mac
-
-    self.name = output:match("^(Name: |Alias: )(.*)\n") or self.name
-
-    local paired = output:match("Paired: (%w+)")
-    self.paired = paired and (paired == "yes") or false
-
-    local bonded = output:match("Bonded: (%w+)")
-    self.bonded = bonded and (bonded == "yes") or false
-
-    local trusted = output:match("Trusted: (%w+)")
-    self.trusted = trusted and (trusted == "yes") or false
-
-    local blocked = output:match("Blocked: (%w+)")
-    self.blocked = blocked and (blocked == "yes") or false
-
-    local connected = output:match("Connected: (%w+)")
-    self.connected = connected and (connected == "yes") or false
+    local info = Parse.info(output)
+    self.mac = info.mac or self.mac
+    self.name = info.name or self.name
+    self.paired = info.paired
+    self.bonded = info.bonded
+    self.trusted = info.trusted
+    self.blocked = info.blocked
+    self.connected = info.connected
     return self
 end
 
