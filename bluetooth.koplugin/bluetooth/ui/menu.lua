@@ -421,14 +421,15 @@ function BluetoothMenu:showSearchResults(on_refresh)
     }
     UIManager:show(self.search_menu)
 
-    local elapsed = 0
+    -- Wall-clock deadline: counting polls let slow refreshes stretch a
+    -- 15 s scan to almost a minute, see the on-device log from 2026-10-13.
+    local deadline = os.time() + scan_duration
     local function poll()
         if self.search_menu_closed then
             return
         end
-        elapsed = elapsed + poll_interval
         self.controller:knownDevices() -- re-shells bluetoothctl devices + refreshes each dev
-        local done = elapsed >= scan_duration
+        local done = os.time() >= deadline
         self.search_menu:switchItemTable(
             done and _("Search complete") or _("Searching for devices…"),
             buildItemTable(self.controller.known_devices)
