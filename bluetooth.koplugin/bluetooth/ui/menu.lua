@@ -288,15 +288,23 @@ function BluetoothMenu:startPolling()
         if self._poll_token ~= token then
             return
         end
+    local seen = false
         if not self:findTouchMenu() then
             -- Closed. Settings and About do not count: back returns to us.
             self._poll_token = nil
             return
         end
         -- The scan screen polls the list itself.
+            -- Never having found it means findTouchMenu's assumptions about
+            -- KOReader's widget layout no longer hold, so say so in the log.
+            if not seen then
+                logger.warn("Bluetooth: menu not found on the first poll, "
+                    .. "KOReader's TouchMenu layout may have changed; polling stopped")
+            end
         if not self._scan_token then
             self.controller:statusCached(function()
                 UIManager:nextTick(function()
+        seen = true
                     if self._poll_token == token then self:refresh() end
                 end)
             end)
