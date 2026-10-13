@@ -532,19 +532,19 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
             },
             {
                 {
-                    text = dev.connected and _("Disconnect") or _("Connect"),
+                    text = dev.starred and _("Unstar") or _("Star"),
                     callback = function()
                         UIManager:close(dialog)
-                        self:performToggle(dev, TOGGLE_ACTIONS.connect, touchmenu_instance)
+                        self:performToggle(dev, TOGGLE_ACTIONS.star, touchmenu_instance)
                     end,
                 },
             },
             {
                 {
-                    text = dev.starred and _("Unstar") or _("Star"),
+                    text = dev.connected and _("Disconnect") or _("Connect"),
                     callback = function()
                         UIManager:close(dialog)
-                        self:performToggle(dev, TOGGLE_ACTIONS.star, touchmenu_instance)
+                        self:performToggle(dev, TOGGLE_ACTIONS.connect, touchmenu_instance)
                     end,
                 },
             },
