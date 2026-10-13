@@ -122,5 +122,31 @@ do
     check(table.concat(got, ",") == "enable:false,disable:true", "superseded while polling: got " .. table.concat(got, ","))
 end
 
+-- Resume during a pending disable: reads serve the cache, and the "on"
+-- waits until the radio reports off before it is sent.
+do
+    local on, order = true, {}
+    local c, calls = build(true, { ["AA:AA"] = { mac = "AA:AA", name = "Keyboard", paired = true } })
+    fake.status = function() return on end
+    fake.disable = function() table.insert(order, "off") end
+    fake.enable = function() table.insert(order, "on"); on = true end
+    calls.read = nil
+    local enabled
+    c:disable()
+    check(c:isDisabling(), "disabling: flag set at once")
+    local list = c:knownDevices()
+    check(#list == 1 and not calls.read, "disabling: cache served, no live read")
+    table.remove(queue, 1)() -- disable debounce: off sent, radio still reads on
+    check(c:isDisabling(), "disabling: still pending while radio reads on")
+    c:enable(function(ok) enabled = ok end)
+    check(not c:isDisabling(), "disabling: enable supersedes it")
+    for _ = 1, 4 do if #queue > 0 then table.remove(queue, 1)() end end -- stale poll ends, enable waits
+    check(table.concat(order, ",") == "off", "wait: on not sent while radio still on, got " .. table.concat(order, ","))
+    on = false        -- netagent finishes
+    drain()
+    check(table.concat(order, ",") == "off,on", "wait: on sent after off, got " .. table.concat(order, ","))
+    check(enabled == true, "wait: enable confirmed")
+end
+
 if failures > 0 then os.exit(1) end
 print("controller_test: ok")

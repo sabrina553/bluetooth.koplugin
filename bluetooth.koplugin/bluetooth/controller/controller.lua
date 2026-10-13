@@ -257,6 +257,37 @@ function controller:status()
     self.is_enabled = self:callDeviceFunction("status")
 end
 
+--- True while a disable() has been called and not yet confirmed or superseded.
+--- The radio may still read as on in this window, but it is going off, so
+--- nothing should talk to bluetoothd. Resume 1s after suspend hit this on
+--- 2026-10-13: a device read ran mid-shutdown and KOReader stopped logging.
+function controller:isDisabling()
+    return self._disabling_generation ~= nil
+        and self._disabling_generation == self._poll_generation
+end
+
+-- After a disable command has been sent, the next "on" must wait for the
+-- radio to report off, or it races the shutdown. Gives up after the same
+-- budget as pollField and sends anyway, since a stuck radio is worse.
+local function waitForOff(self, generation, send, callback, attempt)
+    if generation ~= self._poll_generation then
+        if callback then callback(false) end
+        return
+    end
+    attempt = attempt or 1
+    self:status()
+    if not self.is_enabled or attempt >= 10 then
+        if self.is_enabled then
+            logger.warn("Bluetooth: radio still on after disable, enabling anyway")
+        end
+        self._disable_sent = false
+        return send()
+    end
+    UIManager:scheduleIn(1, function()
+        waitForOff(self, generation, send, callback, attempt + 1)
+    end)
+end
+
 function controller:enable(callback)
     logger.dbg("Enabling Bluetooth Controller")
     -- Bumping the generation here - before the debounced command even
@@ -268,14 +299,21 @@ function controller:enable(callback)
     self._poll_generation = (self._poll_generation or 0) + 1
     local my_generation = self._poll_generation
 
+    local function send()
+        self:callDeviceFunction("enable")
+        pollField(self, "is_enabled", true, callback, nil, my_generation)
+    end
+
     UIManager:scheduleIn(ENABLE_DISABLE_DEBOUNCE_S, function()
         if my_generation ~= self._poll_generation then
             logger.dbg("Bluetooth: enable() superseded before its command was sent, skipping")
             if callback then callback(false) end
             return
         end
-        self:callDeviceFunction("enable")
-        pollField(self, "is_enabled", true, callback, nil, my_generation)
+        if self._disable_sent then
+            return waitForOff(self, my_generation, send, callback)
+        end
+        send()
     end)
 end
 
@@ -283,15 +321,26 @@ function controller:disable(callback)
     logger.dbg("Disabling Bluetooth Controller")
     self._poll_generation = (self._poll_generation or 0) + 1
     local my_generation = self._poll_generation
+    self._disabling_generation = my_generation
+
+    local function done(confirmed)
+        if self._disabling_generation == my_generation then
+            self._disabling_generation = nil
+        end
+        if callback then callback(confirmed) end
+    end
 
     UIManager:scheduleIn(ENABLE_DISABLE_DEBOUNCE_S, function()
         if my_generation ~= self._poll_generation then
             logger.dbg("Bluetooth: disable() superseded before its command was sent, skipping")
-            if callback then callback(false) end
-            return
+            return done(false)
         end
         self:callDeviceFunction("disable")
-        pollField(self, "is_enabled", false, callback, nil, my_generation)
+        self._disable_sent = true
+        pollField(self, "is_enabled", false, function(confirmed)
+            if confirmed then self._disable_sent = false end
+            done(confirmed)
+        end, nil, my_generation)
     end)
 end
 
@@ -397,10 +446,10 @@ function controller:knownDevices(callback)
 
     if self.backend == backends.PocketBook then
         self:status()
-        if not self.is_enabled then
+        if not self.is_enabled or self:isDisabling() then
             self.known_devices = self:devicesFromStore()
             self:applyStoredDeviceState()
-            logger.dbg(string.format("Bluetooth: radio off, using %d cached devices", #self.known_devices))
+            logger.dbg(string.format("Bluetooth: radio off or going off, using %d cached devices", #self.known_devices))
             if callback then callback(true) end
             return self.known_devices
         end
