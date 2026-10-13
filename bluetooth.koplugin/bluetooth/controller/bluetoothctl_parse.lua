@@ -102,4 +102,29 @@ function Parse.info(output)
     }
 end
 
+--- Splits the output of the snapshot script (see Bluez.snapshotScript) into
+--- its sections. Each section is introduced by `@@section <name>` and closed
+--- by `@@rc <exit status>`; a section with no `@@rc` was cut off, which is
+--- reported as `rc = nil` so the caller treats it as timed out.
+---@param output string
+---@return table<string, {text: string, rc: integer|nil}>
+function Parse.snapshot(output)
+    local sections = {}
+    local current
+    for line in string.gmatch((output or "") .. "\n", "([^\r\n]*)\r?\n") do
+        local name = line:match("^@@section (.+)$")
+        local rc = line:match("^@@rc (%d+)$")
+        if name then
+            current = { text = "", rc = nil }
+            sections[name] = current
+        elseif rc and current then
+            current.rc = tonumber(rc)
+            current = nil
+        elseif current then
+            current.text = current.text .. line .. "\n"
+        end
+    end
+    return sections
+end
+
 return Parse

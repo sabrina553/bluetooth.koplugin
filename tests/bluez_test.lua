@@ -83,6 +83,64 @@ fakeBluetoothctl({
 devices = Bluez:knownDevices()
 check("unknown BlueZ: nothing is skipped", devices[2].skip_info, nil)
 
+-- Snapshot read: one script's output becomes the device list
+local function snap(sections)
+    local out = {}
+    for _, sec in ipairs(sections) do
+        table.insert(out, "@@section " .. sec[1])
+        table.insert(out, sec[2])
+        if sec[3] ~= "cut" then table.insert(out, "@@rc " .. (sec[3] or 0)) end
+    end
+    return table.concat(out, "\n") .. "\n"
+end
+local INFO = "Device 00:11:22:33:44:55 (public)\n\tAlias: Test Pager\n\tPaired: yes\n\tConnected: yes\n"
+
+Bluez.paired_command = nil
+devices = Bluez:devicesFromSnapshot(snap({
+    { "devices", ALL },
+    { "paired1", PAIRED },
+    { "paired2", "Invalid command" },
+    { "info 00:11:22:33:44:55", INFO },
+}))
+check("snapshot: all devices", #devices, 3)
+check("snapshot: paired flag", devices[1].paired, true)
+check("snapshot: info parsed, connected", devices[1].connected, true)
+check("snapshot: unpaired", devices[3].paired, false)
+check("snapshot: nothing left to query", devices[1].skip_info and devices[3].skip_info, true)
+check("snapshot: working spelling remembered", Bluez.paired_command, "bluetoothctl devices Paired")
+
+-- Old BlueZ: first spelling rejected, second works
+Bluez.paired_command = nil
+devices = Bluez:devicesFromSnapshot(snap({
+    { "devices", ALL },
+    { "paired1", "Invalid command in menu main: devices" },
+    { "paired2", PAIRED },
+    { "info 00:11:22:33:44:55", INFO },
+}))
+check("snapshot: fallback spelling", devices[1].paired, true)
+check("snapshot: fallback remembered", Bluez.paired_command, "bluetoothctl paired-devices")
+
+-- A timed-out or cut-off part is a failed read, never an empty list
+Bluez.paired_command = nil
+check("snapshot: listing timed out", Bluez:devicesFromSnapshot(snap({ { "devices", "", 143 } })), nil)
+check("snapshot: listing cut off", Bluez:devicesFromSnapshot(snap({ { "devices", ALL, "cut" } })), nil)
+check("snapshot: paired timed out", Bluez:devicesFromSnapshot(snap({
+    { "devices", ALL }, { "paired1", "", 124 } })), nil)
+check("snapshot: no output", Bluez:devicesFromSnapshot(nil), nil)
+
+-- An info that timed out leaves that device with listing data only
+devices = Bluez:devicesFromSnapshot(snap({
+    { "devices", ALL }, { "paired1", PAIRED }, { "info 00:11:22:33:44:55", "", 143 },
+}))
+check("snapshot: info timeout keeps device", #devices, 3)
+check("snapshot: info timeout leaves connected false", devices[1].connected, false)
+
+-- readSnapshot hands the parsed list to the callback
+Bluez.runAsync = function(_, done) done(snap({ { "devices", ALL }, { "paired1", PAIRED } })) end
+local got
+Bluez:readSnapshot(function(list) got = list end)
+check("readSnapshot: callback gets devices", got and #got, 3)
+
 if failures > 0 then
     print(failures .. " failure(s)")
     os.exit(1)
