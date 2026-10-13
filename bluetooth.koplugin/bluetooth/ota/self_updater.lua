@@ -81,7 +81,8 @@ local function findPluginInArchive(reader, expected_repository)
                 local ok, content = pcall(function()
                     return reader:extractToMemory(entry.path)
                 end)
-                if ok and content and content:match(expected_repository) then
+                -- Plain find: "." and "-" in repository names are Lua pattern magic.
+                if ok and content and content:find(expected_repository, 1, true) then
                     return entry_directory
                 end
             end
@@ -312,11 +313,13 @@ function BluetoothSelfUpdater:extractPlugin(source_path, target_path)
         return false, g("Failed to re-open downloaded archive.")
     end
 
-    -- Include the trailing slash so this is a path-segment match, not a bare
-    -- string prefix match. Without it, a sibling directory that happens to
-    -- share the same prefix (e.g. "bluetooth.koplugin-legacy/") would also
-    -- match and get extracted into our target path.
-    local prefix = plugin_root .. "/"
+    -- plugin_root comes from util.splitFilePathName, which already ends in "/"
+    -- (https://github.com/koreader/koreader/blob/master/frontend/util.lua).
+    -- Appending another one matched nothing, so updates "succeeded" with zero
+    -- files. The trailing slash keeps this a path-segment match, so a sibling
+    -- such as "bluetooth.koplugin-legacy/" isn't extracted too.
+    local prefix = plugin_root
+    local extracted_count = 0
 
     for entry in reader:iterate() do
         if entry.mode == "file" and entry.path:sub(1, #prefix) == prefix then
@@ -335,10 +338,16 @@ function BluetoothSelfUpdater:extractPlugin(source_path, target_path)
                 reader:close()
                 return false, T(g("Failed to extract file: %1"), entry.path)
             end
+            extracted_count = extracted_count + 1
         end
     end
 
     reader:close()
+
+    -- Never report success for an update that installed nothing.
+    if extracted_count == 0 then
+        return false, g("No plugin files found in archive.")
+    end
 
     return true, nil
 end
