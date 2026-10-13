@@ -7,6 +7,8 @@ local _ = require("gettext")
 local BackendSelect = require("bluetooth/controller/backend_select")
 local PocketBook = require("bluetooth/controller/pocketbook")
 local Bluez = require("bluetooth/controller/bluez")
+local BluezDbus = require("bluetooth/controller/bluez_dbus")
+local Dbus = require("bluetooth/controller/dbus")
 local Standby = require("bluetooth/standby")
 local Poll = require("bluetooth/controller/poll")
 local Parse = require("bluetooth/controller/bluetoothctl_parse")
@@ -46,6 +48,7 @@ end
 local backends = {
     PocketBook = PocketBook:new(),
     Bluez = Bluez:new(),
+    BluezDbus = BluezDbus:new(),
 }
 
 function controller:init()
@@ -57,6 +60,7 @@ function controller:init()
         -- via the backend, so can any Devices instance it constructs).
         self.backend.controller = self
     end
+    self:applyMode()
 
     -- Only read devices when the radio is already on: on PocketBook a read
     -- powers the radio on and off again, which flickered it on every view
@@ -67,6 +71,33 @@ function controller:init()
     end
 
     logger.dbg("Bluetooth.koplugin.Controller Initialized")
+end
+
+--- Picks Fast (D-Bus reads) or Compatible (bluetoothctl) from the setting,
+--- see vault Docs/D-Bus backend plan. Called at init and when the setting
+--- changes; a user choice also clears an earlier fallback, so Fast is retried.
+---@param reset boolean|nil
+function controller:applyMode(reset)
+    if reset then BluezDbus.reset() end
+    local setting = self.settings and self.settings.getBackendMode and self.settings:getBackendMode() or "auto"
+    self.mode = BackendSelect.mode(setting, Dbus.available())
+    local transport = self.mode == "fast" and BluezDbus or Bluez
+    if self.backend == backends.PocketBook and self.backend.setTransport then
+        self.backend:setTransport(transport)
+    elseif self.type == "Bluez" then
+        self.backend = self.mode == "fast" and backends.BluezDbus or backends.Bluez
+        self.backend.controller = self
+    end
+    logger.info("Bluetooth: backend mode", self.mode, "(setting " .. setting .. ")")
+end
+
+--- The mode in use right now: "compatible" after Fast gave up this session.
+---@return string "fast" | "compatible"
+function controller:activeMode()
+    if self.mode == "fast" and BluezDbus.isBroken() then
+        return "compatible"
+    end
+    return self.mode or "compatible"
 end
 
 function controller:Devicetype()

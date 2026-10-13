@@ -2,6 +2,7 @@ local DataStorage = require("datastorage")
 local LuaSettings = require("luasettings")
 local logger = require("logger")
 local Version = require("bluetooth/ota/version")
+local BackendSelect = require("bluetooth/controller/backend_select")
 
 ---@class BluetoothSettingsData
 ---@field disable_on_suspend boolean
@@ -9,6 +10,7 @@ local Version = require("bluetooth/ota/version")
 ---@field last_on_wake boolean
 ---@field radio_was_on boolean
 ---@field update_channel string "stable" | "beta" | "development"
+---@field backend_mode string "auto" | "fast" | "compatible"
 
 local DEFAULTS = {
     disable_on_suspend = false,
@@ -16,6 +18,7 @@ local DEFAULTS = {
     last_on_wake = false,
     radio_was_on = false,
     update_channel = "stable",
+    backend_mode = "auto",
 }
 
 local function shallowCopy(t)
@@ -155,6 +158,21 @@ function BluetoothSettings:setUpdateChannel(channel)
         return
     end
     self.data.update_channel = channel
+    self:write()
+end
+
+function BluetoothSettings:getBackendMode()
+    local mode = self.data.backend_mode
+    return BackendSelect.MODES[mode] and mode or DEFAULTS.backend_mode
+end
+
+---@param mode string "auto" | "fast" | "compatible"
+function BluetoothSettings:setBackendMode(mode)
+    if not BackendSelect.MODES[mode] then
+        logger.warn("Bluetooth Settings: ignoring unknown backend mode", tostring(mode))
+        return
+    end
+    self.data.backend_mode = mode
     self:write()
 end
 

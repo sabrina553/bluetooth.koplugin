@@ -453,9 +453,43 @@ function BluetoothMenu:getSettingsMenu()
             separator = true,
         },
         {
+            text_func = function()
+                local names = { fast = _("Fast"), compatible = _("Compatible") }
+                return T(_("Backend: %1"), names[self.controller:activeMode()])
+            end,
+            sub_item_table = self:getBackendModeMenu(),
+            separator = true,
+        },
+        {
             text = _("About"),
             sub_item_table = self:getAboutMenu(),
         },
+    }
+end
+
+--- Fast reads over D-Bus, Compatible uses bluetoothctl only; see vault
+--- Docs/D-Bus backend plan. Applies at once, no restart.
+function BluetoothMenu:getBackendModeMenu()
+    local function item(mode, text)
+        return {
+            text = text,
+            checked_func = function()
+                return self.settings:getBackendMode() == mode
+            end,
+            radio = true,
+            callback = function(touchmenu_instance)
+                self.settings:setBackendMode(mode)
+                self.controller:applyMode(true)
+                UIManager:broadcastEvent(Event:new("BluetoothSettingsChanged"))
+                touchmenu_instance:updateItems()
+            end,
+            keep_menu_open = true,
+        }
+    end
+    return {
+        item("auto", _("Automatic")),
+        item("fast", _("Fast (D-Bus)")),
+        item("compatible", _("Compatible (bluetoothctl)")),
     }
 end
 
