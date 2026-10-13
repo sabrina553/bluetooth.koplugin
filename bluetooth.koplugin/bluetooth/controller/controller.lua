@@ -146,7 +146,9 @@ end
 ---@param callback fun()|nil
 function controller:snapshotBeforeSuspend(callback)
     self:status()
-    self.was_enabled_before_suspend = self.is_enabled
+    -- Intent, not the reading: a suspend mid-enable sees the radio still off,
+    -- and resume would then leave it off (seen 2026-10-13, quick suspend cycles).
+    self.was_enabled_before_suspend = self:wantsEnabled()
     if not self.is_enabled then
         logger.dbg("Bluetooth: radio is off at suspend, nothing to snapshot")
         if callback then callback() end

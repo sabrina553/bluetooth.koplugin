@@ -198,5 +198,20 @@ do
     check(table.concat(order, ",") == "off", "toggle: only the last intent sent, got " .. table.concat(order, ","))
 end
 
+-- Suspend while an enable is still in flight counts as "was on", so resume
+-- restores it.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    local c = build(false)
+    fake.status = function() return false end
+    c:enable()
+    c:snapshotBeforeSuspend()
+    check(c.was_enabled_before_suspend == true, "snapshot: mid-enable counts as on")
+    c:disable()
+    c:snapshotBeforeSuspend()
+    check(c.was_enabled_before_suspend == false, "snapshot: mid-disable counts as off")
+    drain()
+end
+
 if failures > 0 then os.exit(1) end
 print("controller_test: ok")
