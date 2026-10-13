@@ -39,7 +39,6 @@ function Devices:init()
     self.connected = self.connected or false
     self.starred = self.starred or false
     self.backend = self.backend
-    logger.dbg("Bluetooth.koplugin.Devices Initialized")
 end
 
 --@field controller any
