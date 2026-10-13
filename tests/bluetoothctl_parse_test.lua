@@ -99,6 +99,25 @@ check("no name at all", Parse.info("Device 00:11:22:33:44:55 (public)\n\tPaired:
 
 check("a dashed-MAC alias means unnamed", Parse.info(DISCOVERED).name, nil)
 
+-- listings
+local listing = Parse.deviceList(table.concat({
+    "Device 00:11:22:33:44:55 Test Pager",
+    "[CHG] Controller 00:11:22:33:44:55 Powered: yes",
+    "Device 66:77:88:99:AA:BB 66-77-88-99-AA-BB",
+    "",
+}, "\n"))
+check("listing skips non-device lines", #listing, 2)
+check("listing keeps names", listing[1].name, "Test Pager")
+check("listing maps dashed MAC to Unknown", listing[2].name, "Unknown")
+check("empty listing", #Parse.deviceList(""), 0)
+check("nil listing", #Parse.deviceList(nil), 0)
+
+-- command support differs between BlueZ versions
+check("5.52 rejects 'devices Paired'", Parse.isUnsupportedCommand("\27[1;39mToo many arguments\27[0m\n"), true)
+check("newer BlueZ rejects 'paired-devices'", Parse.isUnsupportedCommand("Invalid command in menu main: paired-devices\n"), true)
+check("an empty listing is not an error", Parse.isUnsupportedCommand(""), false)
+check("a real listing is not an error", Parse.isUnsupportedCommand("Device 00:11:22:33:44:55 Test Pager\n"), false)
+
 if failures > 0 then
     print(failures .. " failure(s)")
     os.exit(1)

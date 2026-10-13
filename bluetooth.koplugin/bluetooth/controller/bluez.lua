@@ -132,15 +132,52 @@ function bluez:unblock(mac)
     run('bluetoothctl unblock ' .. mac)
 end
 
+-- Spellings of "list paired devices", newest first. BlueZ 5.65 added
+-- `devices Paired`; older versions (5.52 on PocketBook) only have
+-- `paired-devices`, and newer ones dropped it. Whichever works is remembered.
+local PAIRED_COMMANDS = { "bluetoothctl devices Paired", "bluetoothctl paired-devices" }
+
+--- MACs of paired devices as a set, or nil if no spelling is understood.
+---@return table<string, boolean>|nil
+function bluez:pairedMacs()
+    local candidates = bluez.paired_command and { bluez.paired_command } or PAIRED_COMMANDS
+
+    for _, cmd in ipairs(candidates) do
+        local output = self.capture(cmd)
+        if not Parse.isUnsupportedCommand(output) then
+            if bluez.paired_command ~= cmd then
+                bluez.paired_command = cmd
+                logger.info("Bluez: listing paired devices with", cmd,
+                    "| bluetoothctl", (self.capture("bluetoothctl version"):gsub("%s+$", "")))
+            end
+            local paired = {}
+            for _, entry in ipairs(Parse.deviceList(output)) do
+                paired[entry.mac] = true
+            end
+            return paired
+        end
+    end
+
+    logger.warn("Bluez: no supported command lists paired devices")
+    return nil
+end
+
+--- Every device BlueZ remembers, including everything a scan has seen.
+--- Unpaired ones are marked `skip_info`: their name is already in the
+--- listing, and running `bluetoothctl info` on each one is what made
+--- refreshes slow once a scan had cached a few dozen devices.
 function bluez:knownDevices()
-    local output = self.capture("bluetoothctl devices")
+    local listing = Parse.deviceList(self.capture("bluetoothctl devices"))
+    local paired = self:pairedMacs()
 
     local devices = {}
-    for line in string.gmatch(output, "[^\r\n]+") do
-        local mac, name = Parse.deviceLine(line)
-        if mac then
-            table.insert(devices, Devices:fromScan(mac, name, self, self.controller))
+    for _, entry in ipairs(listing) do
+        local dev = Devices:fromScan(entry.mac, entry.name, self, self.controller)
+        if paired then
+            dev.paired = paired[entry.mac] == true
+            dev.skip_info = not dev.paired
         end
+        table.insert(devices, dev)
     end
     logger.dbg("Bluez: Found " .. #devices .. " known devices")
     return devices

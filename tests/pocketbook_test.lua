@@ -18,8 +18,8 @@ end
 
 -- PocketBook drives the radio with netagent, so it replaces these; it hands
 -- everything else to Bluez.
--- capture is a shell helper shared by the Bluez functions, not part of the backend API.
-local own = { new = true, status = true, enable = true, disable = true, capture = true }
+-- capture and pairedMacs are helpers inside the Bluez backend, not part of the backend API.
+local own = { new = true, status = true, enable = true, disable = true, capture = true, pairedMacs = true }
 
 for name, value in pairs(Bluez) do
     if type(value) == "function" and not own[name] and type(PocketBook[name]) ~= "function" then

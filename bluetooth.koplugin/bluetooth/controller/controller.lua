@@ -310,7 +310,11 @@ function controller:knownDevices(callback, opts)
         self.known_devices = self:callDeviceFunction("knownDevices") or {}
 
         for _, dev in ipairs(self.known_devices) do
-            dev:refresh()
+            -- Backends mark devices whose state they already know (unpaired
+            -- scan results) so we don't spawn a process for each one.
+            if not dev.skip_info then
+                dev:refresh()
+            end
         end
 
         self:applyStoredDeviceState()

@@ -21,6 +21,33 @@ function Parse.deviceLine(line)
     return mac, name
 end
 
+--- Every device line of a listing, such as `bluetoothctl devices` or its
+--- paired variant. Lines that aren't devices (errors, notices) are skipped.
+---@param output string
+---@return {mac: string, name: string}[]
+function Parse.deviceList(output)
+    local list = {}
+    for line in string.gmatch(output or "", "[^\r\n]+") do
+        local mac, name = Parse.deviceLine(line)
+        if mac then
+            table.insert(list, { mac = mac, name = name })
+        end
+    end
+    return list
+end
+
+--- Whether bluetoothctl rejected the command itself (as opposed to running it
+--- and finding nothing). The command set differs between BlueZ versions, so
+--- callers use this to fall back to another spelling.
+---@param output string
+---@return boolean
+function Parse.isUnsupportedCommand(output)
+    output = (output or ""):lower()
+    return output:find("too many arguments", 1, true) ~= nil
+        or output:find("invalid command", 1, true) ~= nil
+        or output:find("invalid argument", 1, true) ~= nil
+end
+
 ---@class BluetoothctlInfo
 ---@field mac string|nil
 ---@field name string|nil
