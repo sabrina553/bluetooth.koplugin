@@ -140,6 +140,36 @@ end
 ---@field blocked boolean
 ---@field connected boolean
 
+--- One device from its `org.bluez.Device1` properties, with the same fields
+--- as `Parse.info`, or nil if it has no valid Address.
+---@param path string|nil
+---@param props table|nil
+---@return DbusDevice|nil
+function DbusParse.device(path, props)
+    -- MAC from the Address property, not the path: the path form uses
+    -- underscores and other stacks may name paths differently.
+    local mac = type(props) == "table" and props.Address
+    if type(mac) ~= "string" or not mac:match("^%x%x:%x%x:%x%x:%x%x:%x%x:%x%x$") then
+        return nil
+    end
+    local name = props.Alias or props.Name
+    -- An unnamed device's alias is its MAC with dashes, as in Parse.info;
+    -- leave it unset so the menu shows "Unknown".
+    if type(name) ~= "string" or name:upper() == mac:gsub(":", "-"):upper() then
+        name = nil
+    end
+    return {
+        path = path,
+        mac = mac,
+        name = name,
+        paired = props.Paired == true,
+        bonded = props.Bonded == true,
+        trusted = props.Trusted == true,
+        blocked = props.Blocked == true,
+        connected = props.Connected == true,
+    }
+end
+
 --- Adapters and devices from `ObjectManager.GetManagedObjects`. Devices have
 --- the same fields as `Parse.info`, so either backend can build `Devices`
 --- from them. The service name is not assumed: Kobo MTK's bluedroid service
@@ -166,32 +196,31 @@ function DbusParse.managedObjects(output)
             if type(adapter) == "table" then
                 result.adapters[path] = adapter
             end
-            -- MAC from the Address property, not the path: the path form
-            -- uses underscores and other stacks may name paths differently.
-            local mac = type(props) == "table" and props.Address
-            if type(mac) == "string" and mac:match("^%x%x:%x%x:%x%x:%x%x:%x%x:%x%x$") then
-                local name = props.Alias or props.Name
-                -- An unnamed device's alias is its MAC with dashes, as in
-                -- Parse.info; leave it unset so the menu shows "Unknown".
-                if type(name) ~= "string" or name:upper() == mac:gsub(":", "-"):upper() then
-                    name = nil
-                end
-                table.insert(result.devices, {
-                    path = path,
-                    mac = mac,
-                    name = name,
-                    paired = props.Paired == true,
-                    bonded = props.Bonded == true,
-                    trusted = props.Trusted == true,
-                    blocked = props.Blocked == true,
-                    connected = props.Connected == true,
-                })
+            local device = DbusParse.device(path, props)
+            if device then
+                table.insert(result.devices, device)
             end
         end
     end
     -- pairs() order is random; a stable order keeps the menu from shuffling.
     table.sort(result.devices, function(a, b) return a.path < b.path end)
     return result
+end
+
+--- The property table of a `Properties.GetAll` reply.
+---@param output string
+---@return table|nil props
+---@return string|nil error_name
+---@return string|nil error_message
+function DbusParse.properties(output)
+    local values, err, msg = DbusParse.reply(output)
+    if not values then
+        return nil, err, msg
+    end
+    if type(values[1]) ~= "table" then
+        return nil, "parse", "no property table"
+    end
+    return values[1]
 end
 
 --- The single value of a `Properties.Get` reply (`variant boolean true`).
