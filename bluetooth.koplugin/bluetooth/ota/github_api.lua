@@ -2,6 +2,7 @@ local http = require("socket.http")
 local https = require("ssl.https")
 local json = require("json")
 local ltn12 = require("ltn12")
+local socketutil = require("socketutil")
 
 local PluginMetadata = require("bluetooth/plugin_metadata")
 local logger = require("logger")
@@ -49,9 +50,15 @@ function GithubAPI:request(method, uri, data, sink)
         source = ltn12.source.string(body)
     end
 
+    -- Requests run on the UI thread, so bound how long they can block.
+    -- A caller-supplied sink means a file download, which gets longer limits.
+    -- Timeouts: https://github.com/koreader/koreader/blob/master/frontend/socketutil.lua
     local response_table = {}
     if sink == nil then
-        sink = ltn12.sink.table(response_table)
+        socketutil:set_timeout(socketutil.LARGE_BLOCK_TIMEOUT, socketutil.LARGE_TOTAL_TIMEOUT)
+        sink = socketutil.table_sink(response_table)
+    else
+        socketutil:set_timeout(socketutil.FILE_BLOCK_TIMEOUT, socketutil.FILE_TOTAL_TIMEOUT)
     end
     local _, code, _ = client.request({
         url = uri,
@@ -60,6 +67,7 @@ function GithubAPI:request(method, uri, data, sink)
         source = source,
         sink = sink,
     })
+    socketutil:reset_timeout()
 
     local response_text = table.concat(response_table)
     local response = response_text
@@ -255,11 +263,18 @@ function GithubAPI:downloadReleaseArchive(repository, version, name_filter, down
 
     local bytes_total = asset.size
     local bytes_downloaded = 0
+    local started_at = os.time()
 
     local function sink(chunk, _)
         if not chunk then
             download_file:close()
             return 1
+        end
+
+        -- LuaSocket's own timeout resets on every chunk, so enforce a real limit here.
+        if os.time() - started_at > socketutil.FILE_TOTAL_TIMEOUT then
+            download_file:close()
+            return nil, socketutil.SINK_TIMEOUT_CODE
         end
 
         download_file:write(chunk)
@@ -278,7 +293,9 @@ function GithubAPI:downloadReleaseArchive(repository, version, name_filter, down
     if not download_ok then
         os.remove(download_path)
 
-        if not message then
+        -- With a custom sink the body is never collected, so message is ""
+        -- (truthy) rather than nil.
+        if message == nil or message == "" then
             message = "HTTP Error: " .. tostring(code)
         end
 

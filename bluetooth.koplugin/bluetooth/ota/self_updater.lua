@@ -161,17 +161,19 @@ local function pickLatestForChannel(releases, channel)
     return latest
 end
 
+---@return boolean ok false when the check itself failed (offline, rate-limited...)
+---@return string|nil err
 function BluetoothSelfUpdater:fetchLatestVersion()
     if not PluginMetadata.hasRepository() then
         logger.warn("Unknown repository - cannot fetch latest version")
-        return
+        return false, g("No repository defined")
     end
 
     local channel = self:getUpdateChannel()
 
     local ok, releases = self.github_api:getReleases(PluginMetadata.getRepository())
     if not ok or not releases then
-        return
+        return false, g("Could not reach GitHub")
     end
 
     -- nil when the channel has no release yet; don't keep a version cached
@@ -183,6 +185,7 @@ function BluetoothSelfUpdater:fetchLatestVersion()
     -- latest_known_version was actually fetched for the channel currently
     -- selected in settings, in case those ever drift apart.
     self.latest_known_channel = channel
+    return true
 end
 
 function BluetoothSelfUpdater:downloadLatestRelease(progress_callback)
@@ -207,6 +210,7 @@ function BluetoothSelfUpdater:downloadLatestRelease(progress_callback)
         return false, directory_error_message
     end
 
+    local last_percent = -1
     local ok, result, asset = self.github_api:downloadReleaseArchive(
         PluginMetadata.getRepository(),
         self.latest_known_version,
@@ -214,10 +218,13 @@ function BluetoothSelfUpdater:downloadLatestRelease(progress_callback)
         download_path,
         function(bytes_downloaded, bytes_total)
             if progress_callback then
-                progress_callback(
-                    "download",
-                    math.floor(100 * bytes_downloaded / bytes_total)
-                )
+                -- Every report repaints the screen, which is slow on e-ink,
+                -- so report in 10% steps.
+                local percent = math.floor(100 * bytes_downloaded / bytes_total / 10) * 10
+                if percent ~= last_percent then
+                    last_percent = percent
+                    progress_callback("download", percent)
+                end
             end
         end
     )
@@ -308,7 +315,7 @@ function BluetoothSelfUpdater:extractPlugin(source_path, target_path)
 end
 
 function BluetoothSelfUpdater:update(progress_callback)
-    NetworkManager:goOnlineToRun(function()
+    local ran = NetworkManager:goOnlineToRun(function()
         local download_ok, download_path = self:downloadLatestRelease(progress_callback)
 
         if not download_ok then
@@ -336,6 +343,12 @@ function BluetoothSelfUpdater:update(progress_callback)
             progress_callback("complete", 100, nil)
         end
     end)
+
+    -- false means the callback never ran: offline, and Wi-Fi isn't set to
+    -- turn on automatically (or the user cancelled).
+    if ran == false and progress_callback then
+        progress_callback("failed", 100, g("No network connection. Turn on Wi-Fi and try again."))
+    end
 end
 
 return BluetoothSelfUpdater
