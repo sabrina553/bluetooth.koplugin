@@ -25,9 +25,11 @@ end
 function pocketbook:status()
     logger.dbg("Pocketbook-Netagent: Checking Bluetooth status..")
     -- stderr dropped: netagent logs every call there, which floods the log.
-    local handle = io.popen('netagent bt status 2>/dev/null')
+    local handle = io.popen('timeout -k 1 5 netagent bt status 2>/dev/null')
     local output = handle:read("*a")
     handle:close()
+    -- Empty output (timed out) falls through to "ON" below, as before; the
+    -- poll that follows corrects it.
 
     if output:find("BT_STATE_OFF") then
         logger.dbg("Pocketbook-Netagent: Bluetooth is OFF")
