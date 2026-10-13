@@ -267,6 +267,21 @@ function controller:isDisabling()
         and self._disabling_generation == self._poll_generation
 end
 
+--- True while an enable() has been called and not yet confirmed or superseded.
+function controller:isEnabling()
+    return self._enabling_generation ~= nil
+        and self._enabling_generation == self._poll_generation
+end
+
+--- What the radio is heading towards, as opposed to what it reads right now.
+--- A second tap mid-transition reads the old state, so toggle() would repeat
+--- the first command (seen 2026-10-13: disable, disable on one tap each).
+function controller:wantsEnabled()
+    if self:isDisabling() then return false end
+    if self:isEnabling() then return true end
+    return self.is_enabled
+end
+
 -- After a disable command has been sent, the next "on" must wait for the
 -- radio to report off, or it races the shutdown. Gives up after the same
 -- budget as pollField and sends anyway, since a stuck radio is worse.
@@ -299,10 +314,14 @@ function controller:enable(callback)
     -- polling status() concurrently against the same underlying radio.
     self._poll_generation = (self._poll_generation or 0) + 1
     local my_generation = self._poll_generation
+    self._enabling_generation = my_generation
     local release = Standby.hold()
     local user_callback = callback
     callback = function(confirmed)
         release()
+        if self._enabling_generation == my_generation then
+            self._enabling_generation = nil
+        end
         if user_callback then user_callback(confirmed) end
     end
 
@@ -355,7 +374,7 @@ end
 
 function controller:toggle(callback)
     self:status()
-    if self.is_enabled then
+    if self:wantsEnabled() then
         return self:disable(callback)
     else
         return self:enable(callback)

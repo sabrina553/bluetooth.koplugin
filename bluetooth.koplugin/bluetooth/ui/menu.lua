@@ -153,7 +153,7 @@ function BluetoothMenu:buildMenuTable()
             text = _("Bluetooth"),
             callback = function(touchmenu_instance)
                 local msg
-                if self.controller.is_enabled then
+                if self.controller:wantsEnabled() then
                     msg = InfoMessage:new{ text = _("Disabling Bluetooth") }
                 else
                     msg = InfoMessage:new{ text = _("Enabling Bluetooth") }

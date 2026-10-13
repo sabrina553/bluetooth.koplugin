@@ -178,5 +178,25 @@ do
     check(holds == 0, "standby: released when superseded, got " .. holds)
 end
 
+-- A second tap while a transition is in flight reverses it, not repeats it,
+-- even though the radio still reads the old state.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    local on, order = true, {}
+    local c = build(true)
+    fake.status = function() return on end
+    fake.disable = function() table.insert(order, "off") end
+    fake.enable = function() table.insert(order, "on"); on = true end
+    c:toggle()                 -- radio reads on: heads off
+    check(not c:wantsEnabled(), "toggle: wants off after first tap")
+    c:toggle()                 -- still reads on, but should now enable
+    check(c:wantsEnabled(), "toggle: wants on after second tap")
+    c:toggle()                 -- and back to off
+    check(not c:wantsEnabled(), "toggle: wants off after third tap")
+    on = false
+    drain()
+    check(table.concat(order, ",") == "off", "toggle: only the last intent sent, got " .. table.concat(order, ","))
+end
+
 if failures > 0 then os.exit(1) end
 print("controller_test: ok")
