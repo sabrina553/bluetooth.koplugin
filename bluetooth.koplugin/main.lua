@@ -1,6 +1,17 @@
 local logger = require("logger")
 local _ = require("gettext")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
+local Device = require("device")
+
+local BackendSelect = require("bluetooth/controller/backend_select")
+
+-- No backend for this device (Kobo, Kindle, Android): don't load at all.
+-- KOReader skips a plugin whose main.lua returns { disabled = true }
+-- (frontend/pluginloader.lua), so there are no menu entries or popups.
+if not BackendSelect.select(Device) then
+    logger.info("Bluetooth.koplugin: no backend for this device, not loading")
+    return { disabled = true }
+end
 
 local BluetoothMenu = require("bluetooth/ui/menu")
 local controller = require("bluetooth/controller/controller")

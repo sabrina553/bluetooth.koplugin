@@ -4,6 +4,7 @@ local UIManager = require("ui/uimanager")
 local InfoMessage = require("ui/widget/infomessage")
 local _ = require("gettext")
 
+local BackendSelect = require("bluetooth/controller/backend_select")
 local PocketBook = require("bluetooth/controller/pocketbook")
 local Bluez = require("bluetooth/controller/bluez")
 
@@ -54,23 +55,14 @@ function controller:init()
 end
 
 function controller:Devicetype()
-    if Device:isAndroid() then
-        self.type = "Android"
-    elseif Device:isPocketBook() then
-        self.type = "PocketBook"
-    elseif Device:isEmulator() or Device:isDesktop() then
-        self.type = "Bluez"
-    elseif Device:isKindle() then
-        self.type = "Kindle"
-    elseif Device:isKobo() then
-        self.type = "Kobo"
-    end
+    self.type = BackendSelect.select(Device)
 end
 
 function controller:callDeviceFunction(action, variable)
     if self.backend and self.backend[action] then
         return self.backend[action](self.backend, variable)
     else
+        logger.warn("Bluetooth: backend has no action", tostring(action))
         UIManager:show(InfoMessage:new { text = _("Unsupported Bluetooth action on this device"), timeout = 2, })
     end
 end
