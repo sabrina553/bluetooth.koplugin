@@ -55,8 +55,13 @@ function controller:init()
         self.backend.controller = self
     end
 
+    -- Only read devices when the radio is already on: on PocketBook a read
+    -- powers the radio on and off again, which flickered it on every view
+    -- change. The menu refreshes when it is opened.
     self:status()
-    self:knownDevices()
+    if self.is_enabled then
+        self:knownDevices()
+    end
 
     logger.dbg("Bluetooth.koplugin.Controller Initialized")
 end
@@ -127,16 +132,25 @@ function controller:getStarredDevices()
     return starred
 end
 
---- Call right before bluetooth gets torn down for suspend/pause. Refreshes
---- device state one last time (so `connected` reflects reality) and snapshots
---- it to disk — bluetoothctl won't remember "was connected right before
---- suspend" once the radio's been power-cycled, so this is our only record.
---- Takes a callback because knownDevices() can be async (e.g. on PocketBook,
---- which needs to confirm the radio is on before it can query device info);
---- persisting before that finishes would risk writing stale `connected`
---- values.
+--- Call right before bluetooth gets torn down for suspend. Records whether
+--- the radio was on (so resume only restores a radio that was on), and, if
+--- it was, refreshes device state one last time and snapshots it to disk -
+--- bluetoothctl won't remember "was connected right before suspend" once
+--- the radio's been power-cycled, so this is our only record.
+--- With the radio off there is nothing to snapshot, and reading devices
+--- would power it on (PocketBook), so it is skipped.
+--- Takes a callback because knownDevices() can be async; persisting before
+--- that finishes would risk writing stale `connected` values.
 ---@param callback fun()|nil
 function controller:snapshotBeforeSuspend(callback)
+    self:status()
+    self.was_enabled_before_suspend = self.is_enabled
+    if not self.is_enabled then
+        logger.dbg("Bluetooth: radio is off at suspend, nothing to snapshot")
+        if callback then callback() end
+        return
+    end
+
     self:knownDevices(function()
         self:persistDeviceState()
         if callback then callback() end

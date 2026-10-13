@@ -4,17 +4,13 @@ local logger = require("logger")
 local Version = require("bluetooth/ota/version")
 
 ---@class BluetoothSettingsData
----@field disable_on_lock boolean
 ---@field disable_on_suspend boolean
----@field enable_on_wake boolean
 ---@field starred_on_wake boolean
 ---@field last_on_wake boolean
 ---@field update_channel string "stable" | "beta" | "development"
 
 local DEFAULTS = {
-    disable_on_lock = false,
     disable_on_suspend = false,
-    enable_on_wake = false,
     starred_on_wake = false,
     last_on_wake = false,
     update_channel = "stable",
@@ -85,20 +81,6 @@ function BluetoothSettings:write()
     return true
 end
 
-function BluetoothSettings:getDisableOnLock()
-    return self.data.disable_on_lock or DEFAULTS.disable_on_lock
-end
-
-function BluetoothSettings:setDisableOnLock(disable_on_lock)
-    self.data.disable_on_lock = disable_on_lock
-    self:write()
-end
-
-function BluetoothSettings:toggleDisableOnLock()
-    self.data.disable_on_lock = not self:getDisableOnLock()
-    self:write()
-end
-
 function BluetoothSettings:getDisableOnSuspend()
     return self.data.disable_on_suspend or DEFAULTS.disable_on_suspend
 end
@@ -110,20 +92,6 @@ end
 
 function BluetoothSettings:toggleDisableOnSuspend()
     self.data.disable_on_suspend = not self:getDisableOnSuspend()
-    self:write()
-end
-
-function BluetoothSettings:getEnableOnWake()
-    return self.data.enable_on_wake or DEFAULTS.enable_on_wake
-end
-
-function BluetoothSettings:setEnableOnWake(enable_on_wake)
-    self.data.enable_on_wake = enable_on_wake
-    self:write()
-end
-
-function BluetoothSettings:toggleEnableOnWake()
-    self.data.enable_on_wake = not self:getEnableOnWake()
     self:write()
 end
 
