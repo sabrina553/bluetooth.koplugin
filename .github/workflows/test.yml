@@ -1,0 +1,20 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LuaJIT
+        run: sudo apt-get update && sudo apt-get install -y luajit
+
+      - name: Syntax check
+        run: find bluetooth.koplugin -name '*.lua' -print0 | xargs -0 -n1 luajit -bl > /dev/null
+
+      - name: Run tests
+        run: for t in tests/*_test.lua; do luajit "$t"; done

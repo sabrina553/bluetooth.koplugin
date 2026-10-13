@@ -16,6 +16,30 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name }}
 
+      # A tag that disagrees with _meta.lua makes devices offer the same
+      # update forever, and the updater's channels rely on the tag format
+      # (bluetooth.koplugin/bluetooth/ota/version.lua).
+      - name: Check tag, version and release type
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          set -euo pipefail
+          meta=$(sed -n 's/.*version = "\(.*\)".*/\1/p' bluetooth.koplugin/_meta.lua)
+          if [ "$meta" != "$TAG" ]; then
+            echo "::error::Tag $TAG does not match _meta.lua version $meta"; exit 1
+          fi
+          if [[ "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            expected=false
+          elif [[ "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+-(dev|beta|rc)\.[0-9]+$ ]]; then
+            expected=true
+          else
+            echo "::error::Tag $TAG is not X.Y.Z or X.Y.Z-(dev|beta|rc).N"; exit 1
+          fi
+          if [ "$PRERELEASE" != "$expected" ]; then
+            echo "::error::Release $TAG should have prerelease=$expected"; exit 1
+          fi
+
       - name: Create zip
         run: |
           set -ex
