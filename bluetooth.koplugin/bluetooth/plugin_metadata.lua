@@ -1,4 +1,21 @@
-local _meta = require("_meta")
+local PluginPath = require("bluetooth/plugin_path")
+
+-- Not require("_meta"): KOReader caches modules by name across all plugins,
+-- so whichever plugin required "_meta" first would hand its own file to every
+-- other plugin that does the same. Loading by path keeps this plugin's own.
+---@return table
+local function loadOwnMeta()
+    local dir = PluginPath.get()
+    local chunk = dir and loadfile(dir .. "/_meta.lua")
+    if not chunk then
+        return {}
+    end
+
+    local ok, meta = pcall(chunk)
+    return ok and type(meta) == "table" and meta or {}
+end
+
+local _meta = loadOwnMeta()
 
 ---@class BluetoothPluginMetadata
 local PluginMetadata = {}
