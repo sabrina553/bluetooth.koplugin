@@ -19,9 +19,11 @@ end
 -- PocketBook drives the radio with netagent, so it replaces these; it hands
 -- everything else to Bluez.
 -- capture, lastTimedOut, pairedMacs, the timeout and snapshot helpers are helpers inside the Bluez backend, not part of the backend API.
+-- setTransport picks Bluez or BluezDbus; readInfo is typed state for Devices:refresh in either mode.
 local own = { new = true, status = true, enable = true, disable = true, capture = true, lastTimedOut = true, pairedMacs = true,
     snapshotScript = true, runAsync = true, devicesFromSnapshot = true, readStatus = true,
-    shellSucceeds = true, readFailed = true, timeoutStyle = true, timeoutPrefix = true }
+    shellSucceeds = true, readFailed = true, timeoutStyle = true, timeoutPrefix = true,
+    setTransport = true, readInfo = true }
 
 for name, value in pairs(Bluez) do
     if type(value) == "function" and not own[name] and type(PocketBook[name]) ~= "function" then
