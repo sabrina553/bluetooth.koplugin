@@ -27,6 +27,8 @@ check("a different dashed MAC is a real name", name, "00-11-22-aa-bb-cc")
 
 check("not a device line", Parse.deviceLine("[CHG] Controller 00:11:22:33:44:55 Powered: yes"), nil)
 check("empty line", Parse.deviceLine(""), nil)
+check("scan notice is not a device", Parse.deviceLine("[CHG] Device 00:11:22:33:44:55 AdvertisingFlags:"), nil)
+check("coloured scan notice is not a device", Parse.deviceLine("\27[0;92mNEW\27[0m] Device 00:11:22:33:44:55 Test Pager"), nil)
 
 -- bluetoothctl info
 local CONNECTED = table.concat({

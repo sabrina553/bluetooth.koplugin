@@ -11,7 +11,9 @@ local Parse = {}
 ---@return string|nil mac
 ---@return string|nil name
 function Parse.deviceLine(line)
-    local mac, rest = string.match(line, "Device (%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)%s+(.*)")
+    -- Anchored: scan notices such as "[CHG] Device <mac> AdvertisingFlags: ..."
+    -- also contain "Device <mac>" and used to be listed as a device.
+    local mac, rest = string.match(line, "^%s*Device (%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)%s+(.*)")
     if not mac then
         return nil
     end
