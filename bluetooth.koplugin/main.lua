@@ -87,7 +87,11 @@ function Bluetooth:restoreBluetoothState(allow_enable)
         self.controller:knownDevices(function(fresh)
             -- Not fresh: the radio was switched again during the read, so the
             -- list describes a radio that is gone.
-            if fresh then self.controller:reconnectOnWake() end
+            if fresh then
+                self.controller:reconnectOnWake()
+            else
+                logger.dbg("Bluetooth.koplugin: device list went stale during wake, not reconnecting")
+            end
         end)
     end
 
@@ -97,7 +101,11 @@ function Bluetooth:restoreBluetoothState(allow_enable)
     -- enable() supersedes the disable and waits for the radio to go down.
     if self.controller:isDisabling() and allow_enable then
         self.controller:enable(function(enabled_confirmed)
-            if enabled_confirmed then reconnect() end
+            if enabled_confirmed then
+                reconnect()
+            else
+                logger.warn("Bluetooth.koplugin: could not confirm bluetooth enabled, skipping reconnect")
+            end
         end)
         return
     end

@@ -168,6 +168,7 @@ function controller:snapshotBeforeSuspend(callback)
         for _, dev in ipairs(self.known_devices or {}) do
             if dev.connected then table.insert(self.connected_at_suspend, dev.mac) end
         end
+        logger.dbg(string.format("Bluetooth: %d device(s) connected at suspend", #self.connected_at_suspend))
         if callback then callback() end
     end, { blocking = true })
 end
@@ -181,10 +182,12 @@ function controller:reconnectOnWake()
     end
 
     local wanted_macs = {}
+    local starred_count, last_count = 0, 0
 
     if self.settings:getStarredOnWake() then
         for _, entry in ipairs(self.device_store:getStarred()) do
             wanted_macs[entry.mac] = true
+            starred_count = starred_count + 1
         end
     end
 
@@ -193,8 +196,15 @@ function controller:reconnectOnWake()
     if self.settings:getLastOnWake() then
         for _, mac in ipairs(self.connected_at_suspend or {}) do
             wanted_macs[mac] = true
+            last_count = last_count + 1
         end
     end
+    -- One line per wake, so a wake that reconnects nothing says why
+    -- (unexplained miss on the reader, 2026-10-19 03:04).
+    logger.dbg(string.format("Bluetooth: wake reconnect, starred on wake %s (%d), last on wake %s (%d%s)",
+        tostring(self.settings:getStarredOnWake()), starred_count,
+        tostring(self.settings:getLastOnWake()), last_count,
+        self.connected_at_suspend == nil and ", no suspend snapshot" or ""))
     self.connected_at_suspend = nil
 
     for mac in pairs(wanted_macs) do
