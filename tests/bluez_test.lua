@@ -26,11 +26,13 @@ local ALL = table.concat({
 local PAIRED = "Device 00:11:22:33:44:55 Test Pager\n"
 
 -- Replaces Bluez.capture with canned answers and records the calls made.
-local function fakeBluetoothctl(answers)
+-- rcs gives exit statuses; without one, no status is captured.
+local function fakeBluetoothctl(answers, rcs)
     local calls = {}
     Bluez.paired_command = nil
     Bluez.capture = function(cmd)
         table.insert(calls, cmd)
+        Bluez.last_rc = rcs and rcs[cmd]
         return answers[cmd] or ""
     end
     return calls
@@ -83,6 +85,22 @@ fakeBluetoothctl({
 devices = Bluez:knownDevices()
 check("unknown BlueZ: nothing is skipped", devices[2].skip_info, nil)
 
+-- A command that exits with an error is a failed read, not an empty list
+local USAGE = "timeout: invalid option -- 'k'\nUsage: timeout [-t SECS] [-s SIG] PROG ARGS\n"
+fakeBluetoothctl({ ["bluetoothctl devices"] = USAGE }, { ["bluetoothctl devices"] = 1 })
+check("error exit: listing is a failed read", Bluez:knownDevices(), nil)
+fakeBluetoothctl({ ["bluetoothctl devices"] = ALL, ["bluetoothctl devices Paired"] = USAGE },
+    { ["bluetoothctl devices"] = 0, ["bluetoothctl devices Paired"] = 1 })
+check("error exit: paired read fails the whole read", Bluez:knownDevices(), nil)
+check("error exit: no spelling remembered", Bluez.paired_command, nil)
+fakeBluetoothctl({
+    ["bluetoothctl devices"] = ALL,
+    ["bluetoothctl devices Paired"] = "Too many arguments\n",
+    ["bluetoothctl paired-devices"] = PAIRED,
+}, { ["bluetoothctl devices"] = 0, ["bluetoothctl devices Paired"] = 1, ["bluetoothctl paired-devices"] = 0 })
+devices = Bluez:knownDevices()
+check("error exit: a rejected spelling still falls back", devices and devices[1].paired, true)
+
 -- Snapshot read: one script's output becomes the device list
 local function snap(sections)
     local out = {}
@@ -126,6 +144,12 @@ check("snapshot: listing timed out", Bluez:devicesFromSnapshot(snap({ { "devices
 check("snapshot: listing cut off", Bluez:devicesFromSnapshot(snap({ { "devices", ALL, "cut" } })), nil)
 check("snapshot: paired timed out", Bluez:devicesFromSnapshot(snap({
     { "devices", ALL }, { "paired1", "", 124 } })), nil)
+check("snapshot: listing exited with an error", Bluez:devicesFromSnapshot(snap({ { "devices", USAGE, 1 } })), nil)
+check("snapshot: paired exited with an error", Bluez:devicesFromSnapshot(snap({
+    { "devices", ALL }, { "paired1", USAGE, 1 } })), nil)
+devices = Bluez:devicesFromSnapshot(snap({
+    { "devices", ALL }, { "paired1", "Too many arguments", 1 }, { "paired2", PAIRED } }))
+check("snapshot: rejected spelling with error status falls back", devices and devices[1].paired, true)
 check("snapshot: no output", Bluez:devicesFromSnapshot(nil), nil)
 
 -- An info that timed out leaves that device with listing data only

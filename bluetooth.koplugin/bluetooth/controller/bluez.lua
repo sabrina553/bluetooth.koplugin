@@ -125,6 +125,20 @@ function bluez.lastTimedOut()
     return bluez.last_rc == 124 or bluez.last_rc == 143 or bluez.last_rc == 137
 end
 
+--- Whether a read with this exit status and output failed: it timed out, or
+--- the command exited with an error that is not just bluetoothctl rejecting
+--- an unknown spelling. A failed read is never an empty list (a `timeout`
+--- that rejected its options printed its usage with status 1, and that was
+--- read as "no devices", crash.log 2026-10-18).
+---@param rc number|nil
+---@param output string|nil
+---@return boolean
+function bluez.readFailed(rc, output)
+    if rc == nil then return false end -- no status captured, as in tests
+    if rc == 124 or rc == 143 or rc == 137 then return true end
+    return rc ~= 0 and not Parse.isUnsupportedCommand(output)
+end
+
 function bluez:new(ctrl)
     self.__index = self
     return setmetatable({ controller = ctrl }, self)
@@ -205,14 +219,15 @@ bluez.PAIRED_COMMANDS = { "bluetoothctl devices Paired", "bluetoothctl paired-de
 local PAIRED_COMMANDS = bluez.PAIRED_COMMANDS
 
 --- MACs of paired devices as a set, or nil if no spelling is understood.
----@return table<string, boolean>|nil
+--- A failed read returns nil, true.
+---@return table<string, boolean>|nil, boolean|nil
 function bluez:pairedMacs()
     local candidates = bluez.paired_command and { bluez.paired_command } or PAIRED_COMMANDS
 
     for _, cmd in ipairs(candidates) do
         local output = self.capture(cmd)
-        if bluez.lastTimedOut() then
-            return nil
+        if bluez.readFailed(bluez.last_rc, output) then
+            return nil, true
         end
         if not Parse.isUnsupportedCommand(output) then
             if bluez.paired_command ~= cmd then
@@ -237,13 +252,14 @@ end
 --- listing, and running `bluetoothctl info` on each one is what made
 --- refreshes slow once a scan had cached a few dozen devices.
 function bluez:knownDevices()
-    local listing = Parse.deviceList(self.capture("bluetoothctl devices"))
-    if bluez.lastTimedOut() then
-        logger.warn("Bluez: listing devices timed out")
+    local output = self.capture("bluetoothctl devices")
+    if bluez.readFailed(bluez.last_rc, output) then
+        logger.warn("Bluez: listing devices failed, status", bluez.last_rc)
         return nil -- a failed read, not an empty list
     end
-    local paired = self:pairedMacs()
-    if paired == nil and bluez.lastTimedOut() then
+    local listing = Parse.deviceList(output)
+    local paired, failed = self:pairedMacs()
+    if failed then
         return nil
     end
 
@@ -340,14 +356,14 @@ end
 function bluez:devicesFromSnapshot(text)
     if not text then return nil end
     local sections = Parse.snapshot(text)
-    local function timedOut(section)
-        return section == nil or section.rc == nil
-            or section.rc == 124 or section.rc == 143 or section.rc == 137
+    -- A section without a status was cut off.
+    local function failed(section)
+        return section == nil or section.rc == nil or bluez.readFailed(section.rc, section.text)
     end
 
     local listing = sections.devices
-    if timedOut(listing) then
-        logger.warn("Bluez: listing devices timed out")
+    if failed(listing) then
+        logger.warn("Bluez: listing devices failed, status", listing and listing.rc)
         return nil
     end
 
@@ -355,7 +371,7 @@ function bluez:devicesFromSnapshot(text)
     for i, cmd in ipairs(bluez.PAIRED_COMMANDS) do
         local section = sections["paired" .. i]
         if section then
-            if timedOut(section) then return nil end
+            if failed(section) then return nil end
             if not Parse.isUnsupportedCommand(section.text) then
                 bluez.paired_command = cmd
                 paired = {}
@@ -373,7 +389,7 @@ function bluez:devicesFromSnapshot(text)
         if paired then
             dev.paired = paired[entry.mac] == true
             local info = sections["info " .. entry.mac]
-            if dev.paired and info and not timedOut(info) then
+            if dev.paired and info and not failed(info) then
                 dev:parseInfo(info.text)
             end
         end
