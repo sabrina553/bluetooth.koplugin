@@ -213,6 +213,30 @@ do
     drain()
 end
 
+-- Last on Wake: the devices connected at suspend reconnect, even though the
+-- first read after wake reports everything disconnected; the list is used once.
+do
+    local Devices = require("bluetooth/controller/devices")
+    local c = build(true)
+    c.settings = { getStarredOnWake = function() return false end, getLastOnWake = function() return true end }
+    c.device_store.getStarred = function() return {} end
+    fake.knownDevices = function()
+        return { Devices:new({ mac = "AA:AA", name = "Remote", paired = true, connected = true, controller = c }) }
+    end
+    c:status()
+    c:snapshotBeforeSuspend()
+    fake.knownDevices = function()
+        return { Devices:new({ mac = "AA:AA", name = "Remote", paired = true, connected = false, controller = c }) }
+    end
+    c:knownDevices()
+    local connects = 0
+    for _, dev in ipairs(c.known_devices) do dev.connect = function() connects = connects + 1 end end
+    c:reconnectOnWake()
+    check(connects == 1, "last on wake: reconnected after a disconnected read, got " .. connects)
+    c:reconnectOnWake()
+    check(connects == 1, "last on wake: list used only once")
+end
+
 -- A failed or empty live read over a populated store is never saved: the
 -- cached devices are served and starred stays.
 do

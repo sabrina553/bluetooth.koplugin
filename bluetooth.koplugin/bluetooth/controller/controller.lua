@@ -150,6 +150,7 @@ function controller:snapshotBeforeSuspend(callback)
     -- Intent, not the reading: a suspend mid-enable sees the radio still off,
     -- and resume would then leave it off (seen 2026-10-13, quick suspend cycles).
     self.was_enabled_before_suspend = self:wantsEnabled()
+    self.connected_at_suspend = nil
     if not self.is_enabled then
         logger.dbg("Bluetooth: radio is off at suspend, nothing to snapshot")
         if callback then callback() end
@@ -160,6 +161,13 @@ function controller:snapshotBeforeSuspend(callback)
     -- saved `connected` flags must come from a read that finished first.
     self:knownDevices(function()
         self:persistDeviceState()
+        -- Kept in memory as well: the first read after wake saves every device
+        -- as disconnected, which wiped the stored flags before reconnectOnWake
+        -- ran. Memory over a separate file, decided 2026-10-19.
+        self.connected_at_suspend = {}
+        for _, dev in ipairs(self.known_devices or {}) do
+            if dev.connected then table.insert(self.connected_at_suspend, dev.mac) end
+        end
         if callback then callback() end
     end, { blocking = true })
 end
@@ -180,11 +188,14 @@ function controller:reconnectOnWake()
         end
     end
 
+    -- Used once, so a later wake can't reconnect an old list. Quick suspend
+    -- cycles skip both the snapshot and this call, so the list survives them.
     if self.settings:getLastOnWake() then
-        for _, entry in ipairs(self.device_store:getConnected()) do
-            wanted_macs[entry.mac] = true
+        for _, mac in ipairs(self.connected_at_suspend or {}) do
+            wanted_macs[mac] = true
         end
     end
+    self.connected_at_suspend = nil
 
     for mac in pairs(wanted_macs) do
         local dev = self:getDevice(mac)
