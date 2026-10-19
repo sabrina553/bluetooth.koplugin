@@ -102,7 +102,14 @@ function BluetoothSelfUpdater:isUpdateAvailable()
     local current_version = "v" .. PluginMetadata.getVersion()
     local latest_version = self.latest_known_version or current_version
 
-    return Version.isNewer(current_version, latest_version)
+    return Version.isDifferent(current_version, latest_version)
+end
+
+--- True when the offered release is older than the running version, which
+--- the channel rules allow (e.g. switching from dev to stable).
+function BluetoothSelfUpdater:isDowngrade()
+    local current_version = "v" .. PluginMetadata.getVersion()
+    return Version.isNewer(self.latest_known_version or current_version, current_version)
 end
 
 function BluetoothSelfUpdater:getLatestReleaseVersion()

@@ -2,6 +2,8 @@ local logger = require("logger")
 local UIManager = require("ui/uimanager")
 
 local Parse = require("bluetooth/controller/bluetoothctl_parse")
+local Standby = require("bluetooth/standby")
+local Poll = require("bluetooth/controller/poll")
 
 ---@class Devices
 ---@field mac string
@@ -76,28 +78,31 @@ end
 ---@param expected boolean
 ---@param callback fun(confirmed: boolean)|nil called once, with true if state was confirmed
 ---@param attempt integer|nil internal, do not pass
-local function pollField(self, field, expected, callback, attempt)
+local function pollField(self, field, expected, callback, attempt, release)
     attempt = attempt or 1
-    local max_attempts = 10
-    local delay_s = 1
+    -- Held from the first check to the final answer, see bluetooth/standby.lua.
+    release = release or Standby.hold()
+    local max_attempts = Poll.MAX_ATTEMPTS
 
     self:refresh()
 
     if self[field] == expected then
         logger.dbg("Devices: " .. field .. " of " .. Parse.maskMac(self.mac) ..
             " is " .. tostring(expected) .. " after " .. attempt .. " check(s)")
+        release()
         if callback then callback(true) end
         return
     end
 
     if attempt >= max_attempts then
         logger.warn("Devices: could not confirm " .. field .. " state for " .. Parse.maskMac(self.mac))
+        release()
         if callback then callback(false) end
         return
     end
 
-    UIManager:scheduleIn(delay_s, function()
-        pollField(self, field, expected, callback, attempt + 1)
+    UIManager:scheduleIn(Poll.delay(attempt), function()
+        pollField(self, field, expected, callback, attempt + 1, release)
     end)
 end
 
@@ -299,6 +304,13 @@ function Devices:setStarred(starred, callback)
     end
 
     self.starred = starred
+    -- The menu re-reads the list every few seconds, so self may be an older
+    -- copy than the one that gets saved; star the live one too or the save
+    -- writes the old value (lost stars on the reader, 2026-10-19).
+    local live = self.controller:getDevice(self.mac)
+    if live and live ~= self then
+        live.starred = starred
+    end
     self.controller:persistDeviceState()
 
     if callback then callback(true) end

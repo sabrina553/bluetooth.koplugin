@@ -25,9 +25,11 @@ end
 function pocketbook:status()
     logger.dbg("Pocketbook-Netagent: Checking Bluetooth status..")
     -- stderr dropped: netagent logs every call there, which floods the log.
-    local handle = io.popen('netagent bt status 2>/dev/null')
+    local handle = io.popen(Bluez.timeoutPrefix(5) .. 'netagent bt status 2>/dev/null')
     local output = handle:read("*a")
     handle:close()
+    -- Empty output (timed out) falls through to "ON" below, as before; the
+    -- poll that follows corrects it.
 
     if output:find("BT_STATE_OFF") then
         logger.dbg("Pocketbook-Netagent: Bluetooth is OFF")
@@ -35,6 +37,19 @@ function pocketbook:status()
     end
     logger.dbg("Pocketbook-Netagent: Bluetooth is ON")
     return true
+end
+
+--- Same question as status(), asked in the background: done(true|false), or
+--- done(nil) when netagent gave no answer (timed out), so the caller keeps
+--- what it had instead of guessing "on" as status() does.
+---@param done fun(enabled: boolean|nil)
+function pocketbook:readStatus(done)
+    Bluez.runAsync(Bluez.timeoutPrefix(5) .. "netagent bt status 2>/dev/null\n", function(output)
+        if not output or output:match("^%s*$") then
+            return done(nil)
+        end
+        done(output:find("BT_STATE_OFF") == nil)
+    end)
 end
 
 function pocketbook:enable()
@@ -82,6 +97,11 @@ end
 function pocketbook:knownDevices()
     Bluez.controller = self.controller
     return Bluez:knownDevices()
+end
+
+function pocketbook:readSnapshot(done)
+    Bluez.controller = self.controller
+    return Bluez:readSnapshot(done)
 end
 
 function pocketbook:search(duration)

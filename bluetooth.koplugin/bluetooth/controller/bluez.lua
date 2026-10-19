@@ -45,18 +45,98 @@ local function run(cmd)
     os.execute(cmd .. " >/dev/null 2>&1 &")
 end
 
+local CAPTURE_TIMEOUT_S = 5
+
+--- Whether a shell command exits with status 0. A field, not a local, so
+--- tests can replace it.
+---@param cmd string
+---@return boolean
+function bluez.shellSucceeds(cmd)
+    local rc = os.execute(cmd .. " >/dev/null 2>&1")
+    -- LuaJIT returns the status; with Lua 5.2 compatibility it returns true.
+    return rc == 0 or rc == true
+end
+
+--- Which `timeout` syntax the reader understands, found once and kept:
+--- "k" (GNU and newer BusyBox: `timeout -k 1 SECS`), "t" (BusyBox 1.22, on
+--- PocketBook firmware 6.10: `timeout -t SECS`, no -k) or "none".
+--- A tester's reader rejected -k, so every wrapped read failed (crash.log
+--- 2026-10-18, "timeout: invalid option -- 'k'").
+---@return string
+function bluez.timeoutStyle()
+    if not bluez.timeout_style then
+        if bluez.shellSucceeds("timeout -k 1 1 true") then
+            bluez.timeout_style = "k"
+        elseif bluez.shellSucceeds("timeout -t 1 true") then
+            bluez.timeout_style = "t"
+        else
+            bluez.timeout_style = "none"
+            logger.warn("Bluez: no usable timeout command, reads run without a limit")
+        end
+        logger.dbg("Bluez: timeout style", bluez.timeout_style)
+    end
+    return bluez.timeout_style
+end
+
+--- Prefix that limits a command to `secs` seconds, in the reader's syntax.
+--- Old BusyBox has no -k, so it sends KILL straight away: the wrapped
+--- commands only read, so nothing is lost by killing them.
+---@param secs number
+---@return string
+function bluez.timeoutPrefix(secs)
+    local style = bluez.timeoutStyle()
+    if style == "k" then
+        return ("timeout -k 1 %d "):format(secs)
+    elseif style == "t" then
+        return ("timeout -t %d -s KILL "):format(secs)
+    end
+    return ""
+end
+
 --- Output of a command, stdout and stderr together (a rejected command
 --- reports on stderr). A field, not a local, so tests can replace it.
 ---@param cmd string
 ---@return string
 function bluez.capture(cmd)
-    local handle = io.popen(cmd .. " 2>&1")
+    -- A bluetoothctl that cannot reach a restarting bluetoothd never returns
+    -- and froze KOReader until it was killed (13:12:52 and 13:14:08 on
+    -- 2026-10-13, a read right after a quick resume). The timeout turns the
+    -- hang into a failed read.
+    -- The exit status is appended because a timed-out read looks like an
+    -- empty device list otherwise, and saving that wiped the starred flags.
+    bluez.last_rc = nil
+    local handle = io.popen(bluez.timeoutPrefix(CAPTURE_TIMEOUT_S) .. cmd .. " 2>&1; echo __rc=$?")
     if not handle then
         return ""
     end
     local output = handle:read("*a") or ""
     handle:close()
+    local rc = output:match("__rc=(%d+)%s*$")
+    if rc then
+        bluez.last_rc = tonumber(rc)
+        output = output:gsub("__rc=%d+%s*$", "")
+    end
     return output
+end
+
+--- Whether the last capture was cut off by the timeout: 124 (GNU), 143 (BusyBox
+--- after SIGTERM, measured on the reader) or 137 (it needed the kill).
+function bluez.lastTimedOut()
+    return bluez.last_rc == 124 or bluez.last_rc == 143 or bluez.last_rc == 137
+end
+
+--- Whether a read with this exit status and output failed: it timed out, or
+--- the command exited with an error that is not just bluetoothctl rejecting
+--- an unknown spelling. A failed read is never an empty list (a `timeout`
+--- that rejected its options printed its usage with status 1, and that was
+--- read as "no devices", crash.log 2026-10-18).
+---@param rc number|nil
+---@param output string|nil
+---@return boolean
+function bluez.readFailed(rc, output)
+    if rc == nil then return false end -- no status captured, as in tests
+    if rc == 124 or rc == 143 or rc == 137 then return true end
+    return rc ~= 0 and not Parse.isUnsupportedCommand(output)
 end
 
 function bluez:new(ctrl)
@@ -135,15 +215,20 @@ end
 -- Spellings of "list paired devices", newest first. BlueZ 5.65 added
 -- `devices Paired`; older versions (5.52 on PocketBook) only have
 -- `paired-devices`, and newer ones dropped it. Whichever works is remembered.
-local PAIRED_COMMANDS = { "bluetoothctl devices Paired", "bluetoothctl paired-devices" }
+bluez.PAIRED_COMMANDS = { "bluetoothctl devices Paired", "bluetoothctl paired-devices" }
+local PAIRED_COMMANDS = bluez.PAIRED_COMMANDS
 
 --- MACs of paired devices as a set, or nil if no spelling is understood.
----@return table<string, boolean>|nil
+--- A failed read returns nil, true.
+---@return table<string, boolean>|nil, boolean|nil
 function bluez:pairedMacs()
     local candidates = bluez.paired_command and { bluez.paired_command } or PAIRED_COMMANDS
 
     for _, cmd in ipairs(candidates) do
         local output = self.capture(cmd)
+        if bluez.readFailed(bluez.last_rc, output) then
+            return nil, true
+        end
         if not Parse.isUnsupportedCommand(output) then
             if bluez.paired_command ~= cmd then
                 bluez.paired_command = cmd
@@ -167,8 +252,16 @@ end
 --- listing, and running `bluetoothctl info` on each one is what made
 --- refreshes slow once a scan had cached a few dozen devices.
 function bluez:knownDevices()
-    local listing = Parse.deviceList(self.capture("bluetoothctl devices"))
-    local paired = self:pairedMacs()
+    local output = self.capture("bluetoothctl devices")
+    if bluez.readFailed(bluez.last_rc, output) then
+        logger.warn("Bluez: listing devices failed, status", bluez.last_rc)
+        return nil -- a failed read, not an empty list
+    end
+    local listing = Parse.deviceList(output)
+    local paired, failed = self:pairedMacs()
+    if failed then
+        return nil
+    end
 
     local devices = {}
     for _, entry in ipairs(listing) do
@@ -181,6 +274,138 @@ function bluez:knownDevices()
     end
     logger.dbg("Bluez: Found " .. #devices .. " known devices")
     return devices
+end
+
+local SNAPSHOT_TIMEOUT_S = 20
+local SNAPSHOT_POLL_S = 0.2
+local snapshot_counter = 0
+
+--- One shell script that reads everything a refresh needs: the device list,
+--- the paired list (both spellings until one is known to work) and `info`
+--- for each paired device. Each step has its own 5 s timeout, and the
+--- sections are parsed by Parse.snapshot.
+---@return string
+function bluez.snapshotScript()
+    local t = bluez.timeoutPrefix(CAPTURE_TIMEOUT_S)
+    -- PAIRED collects the paired listings so the MACs need no second run.
+    local lines = {
+        'PAIRED=""',
+        'section() { name=$1; shift; out=$("$@" 2>&1); rc=$?; echo "@@section $name"; echo "$out"; echo "@@rc $rc";'
+            .. ' case "$name" in paired*) PAIRED="$PAIRED\n$out";; esac; }',
+        "section devices " .. t .. " bluetoothctl devices",
+    }
+    for i, cmd in ipairs(bluez.PAIRED_COMMANDS) do
+        if not bluez.paired_command or bluez.paired_command == cmd then
+            table.insert(lines, ("section paired%d %s %s"):format(i, t, cmd))
+        end
+    end
+    table.insert(lines, "macs=$(printf '%s' \"$PAIRED\" | sed -n 's/^Device \\([0-9A-Fa-f:]*\\) .*/\\1/p' | sort -u)")
+    table.insert(lines, 'for m in $macs; do section "info $m" ' .. t .. ' bluetoothctl info "$m"; done')
+    return table.concat(lines, "\n") .. "\n"
+end
+
+--- Runs a script in the background and calls done(text) with its output, or
+--- done(nil) if it never finishes. Polled from the UI loop, so nothing
+--- blocks. A field, not a local, so tests can replace it with a synchronous one.
+---@param script string
+---@param done fun(text: string|nil)
+function bluez.runAsync(script, done)
+    local UIManager = require("ui/uimanager")
+    snapshot_counter = snapshot_counter + 1
+    local base = os.tmpname()
+    local script_path, out_path = base .. ".sh", base .. ".out"
+    local f = io.open(script_path, "w")
+    if not f then
+        os.remove(base)
+        return done(nil)
+    end
+    f:write(script)
+    f:close()
+    -- Written to .part and renamed, so a half-written file is never read.
+    -- If the script file is gone afterwards, the poll gave up (its cleanup
+    -- removes it), so the late output is deleted instead of leaking in /tmp.
+    os.execute(("( %ssh %s > %s.part 2>&1; mv %s.part %s; [ -e %s ] || rm -f %s ) >/dev/null 2>&1 &")
+        :format(bluez.timeoutPrefix(SNAPSHOT_TIMEOUT_S), script_path, out_path, out_path, out_path, script_path, out_path))
+
+    local deadline = os.time() + SNAPSHOT_TIMEOUT_S + 5
+    local function cleanup()
+        os.remove(base); os.remove(script_path); os.remove(out_path)
+    end
+    local function poll()
+        local out = io.open(out_path, "r")
+        if out then
+            local text = out:read("*a")
+            out:close()
+            cleanup()
+            return done(text)
+        end
+        if os.time() > deadline then
+            cleanup()
+            return done(nil)
+        end
+        UIManager:scheduleIn(SNAPSHOT_POLL_S, poll)
+    end
+    UIManager:scheduleIn(SNAPSHOT_POLL_S, poll)
+end
+
+--- Devices from the output of snapshotScript, or nil if the read failed
+--- (anything timed out), like knownDevices(). Paired devices come with their
+--- info already parsed; every device is marked `skip_info` so the controller
+--- does not query them again.
+---@param text string|nil
+function bluez:devicesFromSnapshot(text)
+    if not text then return nil end
+    local sections = Parse.snapshot(text)
+    -- A section without a status was cut off.
+    local function failed(section)
+        return section == nil or section.rc == nil or bluez.readFailed(section.rc, section.text)
+    end
+
+    local listing = sections.devices
+    if failed(listing) then
+        logger.warn("Bluez: listing devices failed, status", listing and listing.rc)
+        return nil
+    end
+
+    local paired
+    for i, cmd in ipairs(bluez.PAIRED_COMMANDS) do
+        local section = sections["paired" .. i]
+        if section then
+            if failed(section) then return nil end
+            if not Parse.isUnsupportedCommand(section.text) then
+                bluez.paired_command = cmd
+                paired = {}
+                for _, entry in ipairs(Parse.deviceList(section.text)) do
+                    paired[entry.mac] = true
+                end
+                break
+            end
+        end
+    end
+
+    local devices = {}
+    for _, entry in ipairs(Parse.deviceList(listing.text)) do
+        local dev = Devices:fromScan(entry.mac, entry.name, self, self.controller)
+        if paired then
+            dev.paired = paired[entry.mac] == true
+            local info = sections["info " .. entry.mac]
+            if dev.paired and info and not failed(info) then
+                dev:parseInfo(info.text)
+            end
+        end
+        dev.skip_info = paired ~= nil
+        table.insert(devices, dev)
+    end
+    logger.dbg("Bluez: Found " .. #devices .. " known devices (snapshot)")
+    return devices
+end
+
+--- Starts a read without blocking; done(devices) gets nil on a failed read.
+---@param done fun(devices: table|nil)
+function bluez:readSnapshot(done)
+    bluez.runAsync(bluez.snapshotScript(), function(text)
+        done(self:devicesFromSnapshot(text))
+    end)
 end
 
 function bluez:search(duration)
