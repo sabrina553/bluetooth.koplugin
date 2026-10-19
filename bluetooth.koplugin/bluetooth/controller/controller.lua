@@ -8,6 +8,7 @@ local BackendSelect = require("bluetooth/controller/backend_select")
 local PocketBook = require("bluetooth/controller/pocketbook")
 local Bluez = require("bluetooth/controller/bluez")
 local Standby = require("bluetooth/standby")
+local Poll = require("bluetooth/controller/poll")
 local Parse = require("bluetooth/controller/bluetoothctl_parse")
 local Devices = require("bluetooth/controller/devices")
 
@@ -228,8 +229,7 @@ local function pollField(self, field, expected, callback, attempt, generation)
     logger.dbg ("Polling field: " .. field .. " for value: " .. tostring(expected))
 
     attempt = attempt or 1
-    local max_attempts = 10
-    local delay_s = 1
+    local max_attempts = Poll.MAX_ATTEMPTS
 
     self:status()
 
@@ -251,7 +251,7 @@ local function pollField(self, field, expected, callback, attempt, generation)
         if callback then callback(false) end
         return
     end
-    UIManager:scheduleIn(delay_s, function()
+    UIManager:scheduleIn(Poll.delay(attempt), function()
         pollField(self, field, expected, callback, attempt + 1, generation)
     end)
 end
@@ -338,14 +338,14 @@ local function waitForOff(self, generation, send, callback, attempt)
     end
     attempt = attempt or 1
     self:status()
-    if not self.is_enabled or attempt >= 10 then
+    if not self.is_enabled or attempt >= Poll.MAX_ATTEMPTS then
         if self.is_enabled then
             logger.warn("Bluetooth: radio still on after disable, enabling anyway")
         end
         self._disable_sent = false
         return send()
     end
-    UIManager:scheduleIn(1, function()
+    UIManager:scheduleIn(Poll.delay(attempt), function()
         waitForOff(self, generation, send, callback, attempt + 1)
     end)
 end
