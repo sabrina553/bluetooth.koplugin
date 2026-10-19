@@ -3,6 +3,7 @@ local UIManager = require("ui/uimanager")
 
 local Parse = require("bluetooth/controller/bluetoothctl_parse")
 local Standby = require("bluetooth/standby")
+local Poll = require("bluetooth/controller/poll")
 
 ---@class Devices
 ---@field mac string
@@ -81,8 +82,7 @@ local function pollField(self, field, expected, callback, attempt, release)
     attempt = attempt or 1
     -- Held from the first check to the final answer, see bluetooth/standby.lua.
     release = release or Standby.hold()
-    local max_attempts = 10
-    local delay_s = 1
+    local max_attempts = Poll.MAX_ATTEMPTS
 
     self:refresh()
 
@@ -101,7 +101,7 @@ local function pollField(self, field, expected, callback, attempt, release)
         return
     end
 
-    UIManager:scheduleIn(delay_s, function()
+    UIManager:scheduleIn(Poll.delay(attempt), function()
         pollField(self, field, expected, callback, attempt + 1, release)
     end)
 end
