@@ -141,6 +141,29 @@ local got
 Bluez:readSnapshot(function(list) got = list end)
 check("readSnapshot: callback gets devices", got and #got, 3)
 
+-- timeout syntax: found once, matching what the reader accepts
+local function detectWith(accepts)
+    local tried = {}
+    Bluez.timeout_style = nil
+    Bluez.shellSucceeds = function(cmd)
+        table.insert(tried, cmd)
+        return cmd:find(accepts, 1, true) ~= nil
+    end
+    return tried
+end
+local tried = detectWith("timeout -k")
+check("timeout: GNU or new BusyBox uses -k", Bluez.timeoutPrefix(5), "timeout -k 1 5 ")
+Bluez.timeoutPrefix(5)
+check("timeout: detected only once", #tried, 1)
+detectWith("timeout -t")
+check("timeout: BusyBox 1.22 uses -t with KILL", Bluez.timeoutPrefix(5), "timeout -t 5 -s KILL ")
+check("timeout: snapshot uses the detected syntax",
+    Bluez.snapshotScript():find("section devices timeout -t 5 -s KILL  bluetoothctl devices", 1, true) ~= nil, true)
+check("timeout: snapshot has no -k left", Bluez.snapshotScript():find("-k", 1, true), nil)
+detectWith("nothing works")
+check("timeout: none available runs the command bare", Bluez.timeoutPrefix(5), "")
+Bluez.timeout_style = "k"
+
 if failures > 0 then
     print(failures .. " failure(s)")
     os.exit(1)

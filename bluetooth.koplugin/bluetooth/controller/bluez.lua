@@ -47,6 +47,52 @@ end
 
 local CAPTURE_TIMEOUT_S = 5
 
+--- Whether a shell command exits with status 0. A field, not a local, so
+--- tests can replace it.
+---@param cmd string
+---@return boolean
+function bluez.shellSucceeds(cmd)
+    local rc = os.execute(cmd .. " >/dev/null 2>&1")
+    -- LuaJIT returns the status; with Lua 5.2 compatibility it returns true.
+    return rc == 0 or rc == true
+end
+
+--- Which `timeout` syntax the reader understands, found once and kept:
+--- "k" (GNU and newer BusyBox: `timeout -k 1 SECS`), "t" (BusyBox 1.22, on
+--- PocketBook firmware 6.10: `timeout -t SECS`, no -k) or "none".
+--- A tester's reader rejected -k, so every wrapped read failed (crash.log
+--- 2026-10-18, "timeout: invalid option -- 'k'").
+---@return string
+function bluez.timeoutStyle()
+    if not bluez.timeout_style then
+        if bluez.shellSucceeds("timeout -k 1 1 true") then
+            bluez.timeout_style = "k"
+        elseif bluez.shellSucceeds("timeout -t 1 true") then
+            bluez.timeout_style = "t"
+        else
+            bluez.timeout_style = "none"
+            logger.warn("Bluez: no usable timeout command, reads run without a limit")
+        end
+        logger.dbg("Bluez: timeout style", bluez.timeout_style)
+    end
+    return bluez.timeout_style
+end
+
+--- Prefix that limits a command to `secs` seconds, in the reader's syntax.
+--- Old BusyBox has no -k, so it sends KILL straight away: the wrapped
+--- commands only read, so nothing is lost by killing them.
+---@param secs number
+---@return string
+function bluez.timeoutPrefix(secs)
+    local style = bluez.timeoutStyle()
+    if style == "k" then
+        return ("timeout -k 1 %d "):format(secs)
+    elseif style == "t" then
+        return ("timeout -t %d -s KILL "):format(secs)
+    end
+    return ""
+end
+
 --- Output of a command, stdout and stderr together (a rejected command
 --- reports on stderr). A field, not a local, so tests can replace it.
 ---@param cmd string
@@ -55,11 +101,11 @@ function bluez.capture(cmd)
     -- A bluetoothctl that cannot reach a restarting bluetoothd never returns
     -- and froze KOReader until it was killed (13:12:52 and 13:14:08 on
     -- 2026-10-13, a read right after a quick resume). The timeout turns the
-    -- hang into a failed read. BusyBox and GNU timeout both take -k.
+    -- hang into a failed read.
     -- The exit status is appended because a timed-out read looks like an
     -- empty device list otherwise, and saving that wiped the starred flags.
     bluez.last_rc = nil
-    local handle = io.popen("timeout -k 1 " .. CAPTURE_TIMEOUT_S .. " " .. cmd .. " 2>&1; echo __rc=$?")
+    local handle = io.popen(bluez.timeoutPrefix(CAPTURE_TIMEOUT_S) .. cmd .. " 2>&1; echo __rc=$?")
     if not handle then
         return ""
     end
@@ -224,7 +270,7 @@ local snapshot_counter = 0
 --- sections are parsed by Parse.snapshot.
 ---@return string
 function bluez.snapshotScript()
-    local t = "timeout -k 1 " .. CAPTURE_TIMEOUT_S
+    local t = bluez.timeoutPrefix(CAPTURE_TIMEOUT_S)
     -- PAIRED collects the paired listings so the MACs need no second run.
     local lines = {
         'PAIRED=""',
@@ -262,8 +308,8 @@ function bluez.runAsync(script, done)
     -- Written to .part and renamed, so a half-written file is never read.
     -- If the script file is gone afterwards, the poll gave up (its cleanup
     -- removes it), so the late output is deleted instead of leaking in /tmp.
-    os.execute(("( timeout -k 1 %d sh %s > %s.part 2>&1; mv %s.part %s; [ -e %s ] || rm -f %s ) >/dev/null 2>&1 &")
-        :format(SNAPSHOT_TIMEOUT_S, script_path, out_path, out_path, out_path, script_path, out_path))
+    os.execute(("( %ssh %s > %s.part 2>&1; mv %s.part %s; [ -e %s ] || rm -f %s ) >/dev/null 2>&1 &")
+        :format(bluez.timeoutPrefix(SNAPSHOT_TIMEOUT_S), script_path, out_path, out_path, out_path, script_path, out_path))
 
     local deadline = os.time() + SNAPSHOT_TIMEOUT_S + 5
     local function cleanup()
