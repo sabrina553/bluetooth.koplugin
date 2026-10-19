@@ -9,6 +9,7 @@ local Event = require("ui/event")
 local ButtonDialog = require("ui/widget/buttondialog")
 local logger = require("logger")
 
+local MenuFind = require("bluetooth/ui/menu_find")
 local PluginMetadata = require("bluetooth/plugin_metadata")
 
 local function displayName(dev)
@@ -160,28 +161,10 @@ function BluetoothMenu:refreshMenu(touchmenu_instance)
     touchmenu_instance:updateItems()
 end
 
---- The TouchMenu holding our submenu, or nil if it is closed. It is not handed
---- to us on open, and KOReader's window stack holds its container (ReaderMenu
---- puts the TouchMenu first inside it). The second result is nil when our
---- table is on screen, or its index in the menu's stack when the user has
---- gone into Settings or About.
+--- The TouchMenu holding our submenu, or nil if it is closed; see
+--- bluetooth/ui/menu_find.lua. It is not handed to us on open.
 function BluetoothMenu:findTouchMenu()
-    for i = #UIManager._window_stack, 1, -1 do
-        local container = UIManager._window_stack[i].widget
-        local candidate = container and container[1]
-        if type(candidate) == "table" and candidate.updateItems
-            and type(candidate.item_table) == "table" then
-            if candidate.item_table.is_bluetooth_menu == true then
-                return candidate, nil
-            end
-            for index, level in ipairs(candidate.item_table_stack or {}) do
-                if type(level) == "table" and level.is_bluetooth_menu == true then
-                    return candidate, index
-                end
-            end
-        end
-    end
-    return nil
+    return MenuFind.find(UIManager._window_stack)
 end
 
 --- Builds the full Bluetooth submenu item table from current state. Must
@@ -295,11 +278,17 @@ function BluetoothMenu:startPolling()
         end
         if not self:findTouchMenu() then
             -- Closed. Settings and About do not count: back returns to us.
-            -- Never having found it means findTouchMenu's assumptions about
-            -- KOReader's widget layout no longer hold, so say so in the log.
-            if not seen then
+            -- Another page showing is normal, see MenuFind.anyOpen. No menu at
+            -- all on the first poll may mean KOReader's layout changed (or the
+            -- menu was closed within MENU_POLL_S), so log the layout.
+            if seen then
+                logger.dbg("Bluetooth: menu closed, polling stopped")
+            elseif MenuFind.anyOpen(UIManager._window_stack) then
+                logger.dbg("Bluetooth: another menu page is showing, polling stopped")
+            else
                 logger.warn("Bluetooth: menu not found on the first poll, "
-                    .. "KOReader's TouchMenu layout may have changed; polling stopped")
+                    .. "KOReader's TouchMenu layout may have changed; polling stopped. Windows: "
+                    .. MenuFind.describe(UIManager._window_stack))
             end
             self._poll_token = nil
             return
