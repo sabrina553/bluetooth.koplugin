@@ -278,11 +278,17 @@ function BluetoothMenu:startPolling()
         end
         if not self:findTouchMenu() then
             -- Closed. Settings and About do not count: back returns to us.
-            -- Never having found it means findTouchMenu's assumptions about
-            -- KOReader's widget layout no longer hold, so say so in the log.
-            if not seen then
+            -- Another page showing is normal, see MenuFind.anyOpen. No menu at
+            -- all on the first poll may mean KOReader's layout changed (or the
+            -- menu was closed within MENU_POLL_S), so log the layout.
+            if seen then
+                logger.dbg("Bluetooth: menu closed, polling stopped")
+            elseif MenuFind.anyOpen(UIManager._window_stack) then
+                logger.dbg("Bluetooth: another menu page is showing, polling stopped")
+            else
                 logger.warn("Bluetooth: menu not found on the first poll, "
-                    .. "KOReader's TouchMenu layout may have changed; polling stopped")
+                    .. "KOReader's TouchMenu layout may have changed; polling stopped. Windows: "
+                    .. MenuFind.describe(UIManager._window_stack))
             end
             self._poll_token = nil
             return

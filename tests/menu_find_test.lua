@@ -53,5 +53,18 @@ do
     check(MenuFind.find({ { widget = loop } }) == nil, "cycle ends")
 end
 
+-- Any TouchMenu counts as open, ours or not.
+do
+    check(MenuFind.anyOpen({ { widget = { touchMenu({}) } } }) == true, "anyOpen: another page")
+    check(MenuFind.anyOpen({ { widget = { "panel" } } }) == false, "anyOpen: no menu")
+end
+
+-- The log outline names windows and marks the menu.
+do
+    local outline = MenuFind.describe({ { widget = { touchMenu({}), name = "ReaderMenu" } } })
+    check(outline:find("ReaderMenu", 1, true) and outline:find("[touchmenu]", 1, true),
+        "describe: names the window and marks the menu, got " .. outline)
+end
+
 if failures > 0 then os.exit(1) end
 print("menu_find_test: ok")
