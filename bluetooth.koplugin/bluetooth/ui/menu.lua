@@ -9,6 +9,7 @@ local Event = require("ui/event")
 local ButtonDialog = require("ui/widget/buttondialog")
 local logger = require("logger")
 
+local MenuFind = require("bluetooth/ui/menu_find")
 local PluginMetadata = require("bluetooth/plugin_metadata")
 
 local function displayName(dev)
@@ -160,28 +161,10 @@ function BluetoothMenu:refreshMenu(touchmenu_instance)
     touchmenu_instance:updateItems()
 end
 
---- The TouchMenu holding our submenu, or nil if it is closed. It is not handed
---- to us on open, and KOReader's window stack holds its container (ReaderMenu
---- puts the TouchMenu first inside it). The second result is nil when our
---- table is on screen, or its index in the menu's stack when the user has
---- gone into Settings or About.
+--- The TouchMenu holding our submenu, or nil if it is closed; see
+--- bluetooth/ui/menu_find.lua. It is not handed to us on open.
 function BluetoothMenu:findTouchMenu()
-    for i = #UIManager._window_stack, 1, -1 do
-        local container = UIManager._window_stack[i].widget
-        local candidate = container and container[1]
-        if type(candidate) == "table" and candidate.updateItems
-            and type(candidate.item_table) == "table" then
-            if candidate.item_table.is_bluetooth_menu == true then
-                return candidate, nil
-            end
-            for index, level in ipairs(candidate.item_table_stack or {}) do
-                if type(level) == "table" and level.is_bluetooth_menu == true then
-                    return candidate, index
-                end
-            end
-        end
-    end
-    return nil
+    return MenuFind.find(UIManager._window_stack)
 end
 
 --- Builds the full Bluetooth submenu item table from current state. Must
