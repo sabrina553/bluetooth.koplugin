@@ -304,6 +304,13 @@ function Devices:setStarred(starred, callback)
     end
 
     self.starred = starred
+    -- The menu re-reads the list every few seconds, so self may be an older
+    -- copy than the one that gets saved; star the live one too or the save
+    -- writes the old value (lost stars on the reader, 2026-10-19).
+    local live = self.controller:getDevice(self.mac)
+    if live and live ~= self then
+        live.starred = starred
+    end
     self.controller:persistDeviceState()
 
     if callback then callback(true) end

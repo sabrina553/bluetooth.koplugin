@@ -226,6 +226,21 @@ do
     end
 end
 
+-- Starring a copy from before the last re-read still stars the device that
+-- gets saved.
+do
+    local Devices = require("bluetooth/controller/devices")
+    local c = build(true)
+    local saved
+    c.device_store.saveAll = function(_, list) saved = list[1].starred end
+    local stale = Devices:new({ mac = "AA:AA", name = "Remote", paired = true, controller = c })
+    c.known_devices = { Devices:new({ mac = "AA:AA", name = "Remote", paired = true, controller = c }) }
+    local ok
+    stale:toggleStar(function(confirmed) ok = confirmed end)
+    check(ok == true and saved == true, "star: saved on the live device, not just the stale copy")
+    check(c.known_devices[1].starred == true, "star: live device shows the star")
+end
+
 -- Background read: the cache is served at once, the result is applied when
 -- it lands, reads in flight are shared and a result from before a radio
 -- change is dropped. Every callback fires exactly once.
