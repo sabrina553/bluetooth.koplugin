@@ -171,10 +171,85 @@ snapshot(SERVICE_UNKNOWN .. "@@rc 1\n")
 check("snapshot with radio off fails", got, nil)
 check("snapshot with radio off keeps Fast", BluezDbus.isBroken(), false)
 
--- Actions are inherited, so they stay on bluetoothctl
-check("connect is bluetoothctl's", BluezDbus.connect, Bluez.connect)
+-- Pairing needs an agent and scanning a long-lived client, so both stay on
+-- bluetoothctl; device actions are Fast mode's own (stage 3).
+check("connect is Fast mode's", BluezDbus.connect ~= Bluez.connect, true)
 check("pair is bluetoothctl's", BluezDbus.pair, Bluez.pair)
 check("search is bluetoothctl's", BluezDbus.search, Bluez.search)
+
+-- Device actions (stage 3): one background dbus-send each, errors logged by
+-- name, a D-Bus that can't work here falls back to bluetoothctl.
+do
+    local MAC = "00:11:22:33:44:55"
+    local PATH = "/org/bluez/hci0/dev_00_11_22_33_44_55"
+    local scripts, answer = {}, nil
+    Bluez.timeout_style = "k"
+    Bluez.runAsync = function(script, done) table.insert(scripts, script); done(answer) end
+    local fell_back = {}
+    for _, name in ipairs({ "connect", "disconnect", "trust", "untrust", "block", "unblock", "unpair" }) do
+        Bluez[name .. "_saved"] = Bluez[name]
+        Bluez[name] = function(_, mac) table.insert(fell_back, name .. " " .. mac) end
+    end
+    local function run(name, reply)
+        scripts, fell_back, warnings = {}, {}, {}
+        BluezDbus.reset()
+        answer = reply
+        BluezDbus[name](BluezDbus, MAC)
+        return scripts[1] or ""
+    end
+    local OK = HEADER .. "@@rc 0\n"
+
+    local s = run("connect", OK)
+    check("connect: Device1.Connect on the device path", s:find(PATH .. " org.bluez.Device1.Connect", 1, true) ~= nil, true)
+    check("connect: longer reply timeout", s:find("--reply-timeout=10000", 1, true) ~= nil, true)
+    check("connect: outer timeout above the reply timeout", s:find("^timeout %-k 1 12 ") ~= nil, true)
+    check("connect: success needs no fallback", #fell_back, 0)
+    s = run("disconnect", OK)
+    check("disconnect: Device1.Disconnect", s:find(PATH .. " org.bluez.Device1.Disconnect", 1, true) ~= nil, true)
+    s = run("trust", OK)
+    check("trust: sets Trusted true", s:find("string:org.bluez.Device1 string:Trusted variant:boolean:true", 1, true) ~= nil, true)
+    s = run("untrust", OK)
+    check("untrust: sets Trusted false", s:find("string:Trusted variant:boolean:false", 1, true) ~= nil, true)
+    s = run("block", OK)
+    check("block: sets Blocked true", s:find("string:Blocked variant:boolean:true", 1, true) ~= nil, true)
+    s = run("unblock", OK)
+    check("unblock: sets Blocked false", s:find("string:Blocked variant:boolean:false", 1, true) ~= nil, true)
+    s = run("unpair", OK)
+    check("unpair: Adapter1.RemoveDevice with the path", s:find("/org/bluez/hci0 org.bluez.Adapter1.RemoveDevice objpath:" .. PATH, 1, true) ~= nil, true)
+
+    run("connect", "Error org.bluez.Error.AlreadyConnected: Already Connected\n@@rc 1\n")
+    check("already connected: not a failure", #warnings + #fell_back, 0)
+    run("unpair", "Error org.bluez.Error.DoesNotExist: Does Not Exist\n@@rc 1\n")
+    check("remove twice: not a failure", #warnings + #fell_back, 0)
+
+    run("connect", "Error org.bluez.Error.Failed: br-connection-page-timeout\n@@rc 1\n")
+    check("bluez error: logged by name", warnings[1] ~= nil and warnings[1]:find("org.bluez.Error.Failed", 1, true) ~= nil, true)
+    check("bluez error: stays in Fast", BluezDbus.isBroken() == false and #fell_back == 0, true)
+
+    run("trust", ACCESS_DENIED .. "@@rc 1\n")
+    check("access denied: falls back to bluetoothctl", fell_back[1], "trust " .. MAC)
+    check("access denied: session switches to Compatible", BluezDbus.isBroken(), true)
+
+    run("disconnect", "@@rc 124\n")
+    check("timeout: warned, no fallback", #warnings == 1 and #fell_back == 0, true)
+
+    -- Already in Compatible: straight to bluetoothctl, no dbus-send.
+    scripts, fell_back = {}, {}
+    BluezDbus.broken = "test"
+    BluezDbus:connect(MAC)
+    check("broken session: bluetoothctl only", #scripts == 0 and fell_back[1] == "connect " .. MAC, true)
+    -- A MAC that can't make a path never reaches the shell.
+    BluezDbus.reset()
+    scripts, fell_back = {}, {}
+    BluezDbus:connect("not-a-mac; reboot")
+    check("bad mac: no dbus-send", #scripts, 0)
+
+    for _, name in ipairs({ "connect", "disconnect", "trust", "untrust", "block", "unblock", "unpair" }) do
+        Bluez[name] = Bluez[name .. "_saved"]
+        Bluez[name .. "_saved"] = nil
+    end
+    BluezDbus.reset()
+end
 
 if failures > 0 then
     print(failures .. " failure(s)")
