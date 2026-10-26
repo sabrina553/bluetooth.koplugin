@@ -188,6 +188,26 @@ detectWith("nothing works")
 check("timeout: none available runs the command bare", Bluez.timeoutPrefix(5), "")
 Bluez.timeout_style = "k"
 
+-- Pairing keeps one bluetoothctl session open with an agent (fix/pair-agent).
+do
+    local saved_style, saved_s = Bluez.timeout_style, Bluez.PAIR_SESSION_S
+    Bluez.timeout_style = "k"
+    local cmd = Bluez.pairCommand("00:11:22:33:44:55")
+    check("pair: capped a little past the session, agent set at start",
+        cmd and cmd:find("| timeout %-k 1 25 bluetoothctl %-%-agent NoInputNoOutput$") ~= nil, true)
+    check("pair: not a MAC is refused", Bluez.pairCommand("00:11:22:33:44:55; reboot"), nil)
+    check("pair: nil is refused", Bluez.pairCommand(nil), nil)
+
+    -- Run it for real with cat standing in for bluetoothctl and no wait, to
+    -- see exactly what bluetoothctl would read.
+    Bluez.timeout_style, Bluez.PAIR_SESSION_S = "none", 0
+    local h = io.popen((Bluez.pairCommand("00:11:22:33:44:55"):gsub("bluetoothctl %-%-agent NoInputNoOutput$", "cat")))
+    local fed = h:read("*a"); h:close()
+    check("pair: default agent, pair, quit, in order", fed,
+        "default-agent\npair 00:11:22:33:44:55\nquit\n")
+    Bluez.timeout_style, Bluez.PAIR_SESSION_S = saved_style, saved_s
+end
+
 if failures > 0 then
     print(failures .. " failure(s)")
     os.exit(1)

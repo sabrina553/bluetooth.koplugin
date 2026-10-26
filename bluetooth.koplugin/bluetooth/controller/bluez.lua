@@ -168,13 +168,39 @@ function bluez:disable()
     run('bluetoothctl power off')
 end
 
+-- Pairing needs an agent that stays on the bus to answer the other side
+-- (a phone asks to confirm). A one-shot `bluetoothctl pair` exits at once and
+-- takes its agent with it, so phones failed while keyboards and remotes,
+-- which ask nothing, paired fine (vault Docs/D-Bus findings, 2026-10-13).
+-- One session runs the agent, pairs, and stays open PAIR_SESSION_S.
+-- bluetoothctl registers its own agent at start, so the capability goes on
+-- the command line: a later `agent NoInputNoOutput` is refused ("Agent is
+-- already registered") and the default KeyboardDisplay agent then waits for
+-- a typed "yes" to the phone's code (reader log 2026-10-26 10:17). With
+-- NoInputNoOutput, pairing is Just Works. Showing the code on the reader to
+-- confirm is backlog, after the stable release (Sabrina, 2026-10-26).
+bluez.PAIR_SESSION_S = 20
+
+--- The shell command for one pairing session, or nil if `mac` isn't a MAC
+--- (it goes into a shell command).
+---@param mac string
+---@return string|nil
+function bluez.pairCommand(mac)
+    if type(mac) ~= "string" or not mac:match("^%x%x:%x%x:%x%x:%x%x:%x%x:%x%x$") then
+        return nil
+    end
+    return ("(printf 'default-agent\\npair %s\\n'; sleep %d; printf 'quit\\n') | %sbluetoothctl --agent NoInputNoOutput")
+        :format(mac, bluez.PAIR_SESSION_S, bluez.timeoutPrefix(bluez.PAIR_SESSION_S + 5))
+end
+
 function bluez:pair(mac)
-    logger.dbg("Bluez: Pairing with Bluetooth device: " .. Parse.maskMac(mac))
-    run('bluetoothctl pair ' .. mac)
-    -- os.execute(string.format(
-    --     'echo -e "agent NoInputNoOutput\\ndefault-agent\\npair %s\\nquit\\n" | bluetoothctl &', -- maybe worth repeating this for other commands
-    --     mac
-    -- ))
+    local cmd = bluez.pairCommand(mac)
+    if not cmd then
+        logger.warn("Bluez: not pairing, not a MAC: " .. Parse.maskMac(tostring(mac)))
+        return
+    end
+    logger.dbg("Bluez: Pairing with Bluetooth device (agent session " .. bluez.PAIR_SESSION_S .. "s): " .. Parse.maskMac(mac))
+    run(cmd)
 end
 
 function bluez:unpair(mac)

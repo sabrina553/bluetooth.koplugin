@@ -80,11 +80,12 @@ end
 ---@param expected boolean
 ---@param callback fun(confirmed: boolean)|nil called once, with true if state was confirmed
 ---@param attempt integer|nil internal, do not pass
-local function pollField(self, field, expected, callback, attempt, release)
+---@param max_attempts integer|nil defaults to Poll.MAX_ATTEMPTS
+local function pollField(self, field, expected, callback, attempt, release, max_attempts)
     attempt = attempt or 1
     -- Held from the first check to the final answer, see bluetooth/standby.lua.
     release = release or Standby.hold()
-    local max_attempts = Poll.MAX_ATTEMPTS
+    max_attempts = max_attempts or Poll.MAX_ATTEMPTS
 
     self:refresh()
 
@@ -104,7 +105,7 @@ local function pollField(self, field, expected, callback, attempt, release)
     end
 
     UIManager:scheduleIn(Poll.delay(attempt), function()
-        pollField(self, field, expected, callback, attempt + 1, release)
+        pollField(self, field, expected, callback, attempt + 1, release, max_attempts)
     end)
 end
 
@@ -229,7 +230,7 @@ function Devices:pair(callback)
                 end
                 self:trust(callback)
             end)
-        end)
+        end, nil, nil, Poll.PAIR_ATTEMPTS)
     end)
 end
 
