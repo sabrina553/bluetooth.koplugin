@@ -254,6 +254,13 @@ function BluezDbus:readInfo(mac)
     end
     local props, err, msg = DbusParse.properties(output)
     if not props then
+        -- bluetoothd answered, but has no such device: it was removed. Read
+        -- as unpaired, as bluetoothctl's "not available" is, or the unpair
+        -- poll never confirms (reader log 2026-10-26 09:34). A radio that is
+        -- off answers ServiceUnknown instead.
+        if err == "org.freedesktop.DBus.Error.UnknownObject" then
+            return { mac = mac, paired = false, bonded = false, trusted = false, blocked = false, connected = false }
+        end
         if BluezDbus.giveUp(err, msg) then return Parse.info(Bluez.info(self, mac)) end
         return nil
     end

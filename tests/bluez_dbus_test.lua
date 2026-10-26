@@ -135,9 +135,14 @@ fake({ GetAll = HEADER .. [[
 local info = BluezDbus:readInfo("00:11:22:33:44:55")
 check("readInfo connected", info and info.connected, true)
 check("readInfo asks the right path", calls[1]:find("/org/bluez/hci0/dev_00_11_22_33_44_55 ", 1, true) ~= nil, true)
+-- A removed device answers UnknownObject: read as unpaired, so the unpair
+-- poll confirms, as bluetoothctl's "not available" does (2026-10-26).
 fake({ GetAll = "Error org.freedesktop.DBus.Error.UnknownObject: no such device\n" })
-check("unknown device is a failed read", BluezDbus:readInfo("00:11:22:33:44:55"), nil)
-check("unknown device keeps Fast", BluezDbus.isBroken(), false)
+local gone = BluezDbus:readInfo("00:11:22:33:44:55")
+check("removed device reads as unpaired", gone and gone.paired, false)
+check("removed device keeps Fast", BluezDbus.isBroken(), false)
+fake({ GetAll = SERVICE_UNKNOWN })
+check("radio off is still a failed read", BluezDbus:readInfo("00:11:22:33:44:55"), nil)
 fake({ GetAll = ACCESS_DENIED, ["bluetoothctl info"] = "Device 00:11:22:33:44:55 (public)\n\tPaired: yes\n\tConnected: yes\n" })
 info = BluezDbus:readInfo("00:11:22:33:44:55")
 check("readInfo falls back to bluetoothctl info", info and info.connected, true)
