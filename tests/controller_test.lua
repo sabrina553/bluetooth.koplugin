@@ -527,8 +527,14 @@ do
     check("pair failure: still waiting before the session ends", #results, 0)
     finish(false)
     check("pair failure: reported at once", #results == 1 and results[1] == false, true)
+    local warned = 0
+    local logger = require("logger")
+    local saved_warn = logger.warn
+    logger.warn = function() warned = warned + 1 end
     drain()
+    logger.warn = saved_warn
     check("pair failure: the poll ending later does not report twice", #results, 1)
+    check("pair failure: the leftover poll stops without a WARN", warned, 0)
 end
 
 if failures > 0 then os.exit(1) end
