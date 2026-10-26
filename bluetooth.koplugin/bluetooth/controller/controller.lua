@@ -99,7 +99,7 @@ function controller:getDevice(mac)
     return nil
 end
 
---- Re-applies persisted per-device app state (currently just `starred`) onto
+--- Re-applies persisted per-device app state (`starred`, `held`) onto
 --- the live known_devices list, since knownDevices() builds fresh Devices
 --- instances every time it runs and bluetoothctl doesn't track this for us.
 function controller:applyStoredDeviceState()
@@ -110,8 +110,20 @@ function controller:applyStoredDeviceState()
         local stored = self.device_store:get(dev.mac)
         if stored then
             dev.starred = stored.starred or false
+            dev.held = stored.held or false
         end
     end
+end
+
+--- Sets `held` on the live device and saves it. The menu keeps the object it
+--- drew while the poll replaces the list, so setting it on that object alone
+--- would be lost on the next save (as with Star, 2026-10-19).
+---@param mac string
+---@param held boolean
+function controller:setHeld(mac, held)
+    local live = self:getDevice(mac)
+    if live then live.held = held end
+    self:persistDeviceState()
 end
 
 --- Writes the current known_devices list to disk.
@@ -211,7 +223,9 @@ function controller:reconnectOnWake()
 
     for mac in pairs(wanted_macs) do
         local dev = self:getDevice(mac)
-        if dev then
+        if dev and dev.held then
+            logger.dbg("Bluetooth: " .. Parse.maskMac(mac) .. " was disconnected by hand, not reconnecting on wake")
+        elseif dev then
             logger.dbg("Bluetooth: reconnecting to " .. Parse.maskMac(mac) .. " on wake")
             dev:connect()
         else
@@ -488,6 +502,7 @@ function controller:devicesFromStore()
             blocked = entry.blocked,
             connected = false,
             starred = entry.starred,
+            held = entry.held,
             backend = self.backend,
             controller = self,
         }))

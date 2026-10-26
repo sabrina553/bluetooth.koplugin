@@ -27,11 +27,12 @@ local store = Store:new()
 store.data = { ["OLD"] = { mac = "OLD", name = "Gone", paired = true } }
 
 store:saveAll({
-    { mac = "A", name = "Keyboard", paired = true, starred = true },
+    { mac = "A", name = "Keyboard", paired = true, starred = true, held = true },
     { mac = "B", name = "Scan result", paired = false },
 })
 
 check(store:get("A") ~= nil and store:get("A").starred, "paired device kept with its star")
+check(store:get("A").held == true, "held flag stored")
 check(store:get("B") == nil, "unpaired scan result not stored")
 check(store:get("OLD") == nil, "device missing from the list is dropped")
 
