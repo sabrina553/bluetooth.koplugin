@@ -10,6 +10,7 @@ local ButtonDialog = require("ui/widget/buttondialog")
 local logger = require("logger")
 
 local MenuFind = require("bluetooth/ui/menu_find")
+local DbusMonitor = require("bluetooth/controller/dbus_monitor")
 local PluginMetadata = require("bluetooth/plugin_metadata")
 
 local function displayName(dev)
@@ -291,28 +292,65 @@ function BluetoothMenu:startPolling()
                     .. MenuFind.describe(UIManager._window_stack))
             end
             self._poll_token = nil
+            self:stopLiveMonitor()
             return
         end
         seen = true
-        -- The scan screen polls the list itself.
-        if not self._scan_token then
-            self.controller:statusCached(function()
-                UIManager:nextTick(function()
-                    if self._poll_token == token then self:refresh() end
-                end)
-            end)
-            if self.controller.is_enabled then
-                local before = self:deviceSignature()
-                self.controller:knownDevices(function(fresh)
-                    if fresh and self._poll_token == token and self:deviceSignature() ~= before then
-                        self:refreshMenu()
-                    end
-                end)
-            end
-        end
+        self:checkNow(token)
+        self:updateLiveMonitor(token)
         UIManager:scheduleIn(MENU_POLL_S, tick)
     end
+    self:updateLiveMonitor(token)
     UIManager:scheduleIn(MENU_POLL_S, tick)
+end
+
+--- One look at the radio and the devices, redrawing if something changed.
+--- Run by the poll, and by live updates as soon as a signal arrives.
+function BluetoothMenu:checkNow(token)
+    -- The scan screen polls the list itself.
+    if self._scan_token or self._poll_token ~= token then return end
+    self.controller:statusCached(function()
+        UIManager:nextTick(function()
+            if self._poll_token == token then self:refresh() end
+        end)
+    end)
+    if self.controller.is_enabled then
+        local before = self:deviceSignature()
+        self.controller:knownDevices(function(fresh)
+            if fresh and self._poll_token == token and self:deviceSignature() ~= before then
+                self:refreshMenu()
+            end
+        end)
+    end
+end
+
+--- Runs the live-updates monitor while this menu is open, the setting is on
+--- and Fast mode is in use; stops it otherwise. Checked on every poll, so a
+--- mode switch or a fallback to Compatible stops it within MENU_POLL_S.
+function BluetoothMenu:updateLiveMonitor(token)
+    local wanted = token ~= nil and self._poll_token == token
+        and self.settings:getLiveUpdates() and self.controller:activeMode() == "fast"
+        and self.controller.is_enabled
+    if wanted and not self._monitor then
+        self._monitor = DbusMonitor.start(function()
+            -- Several signals arrive together; one check covers them.
+            if self._live_pending then return end
+            self._live_pending = true
+            UIManager:nextTick(function()
+                self._live_pending = false
+                self:checkNow(token)
+            end)
+        end)
+    elseif not wanted then
+        self:stopLiveMonitor()
+    end
+end
+
+function BluetoothMenu:stopLiveMonitor()
+    if self._monitor then
+        self._monitor:stop()
+        self._monitor = nil
+    end
 end
 
 function BluetoothMenu:refresh(touchmenu_instance)
@@ -458,6 +496,21 @@ function BluetoothMenu:getSettingsMenu()
                 return T(_("Backend: %1"), names[self.controller:activeMode()])
             end,
             sub_item_table = self:getBackendModeMenu(),
+        },
+        {
+            text = _("Live updates (experimental)"),
+            help_text = _("While this menu is open in Fast mode, update it as soon as a device changes instead of every 3 seconds."),
+            enabled_func = function()
+                return self.controller:activeMode() == "fast"
+            end,
+            checked_func = function()
+                return self.settings:getLiveUpdates()
+            end,
+            callback = function()
+                self.settings:toggleLiveUpdates()
+                UIManager:broadcastEvent(Event:new("BluetoothSettingsChanged"))
+            end,
+            keep_menu_open = true,
             separator = true,
         },
         {

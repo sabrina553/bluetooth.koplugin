@@ -11,6 +11,7 @@ local BackendSelect = require("bluetooth/controller/backend_select")
 ---@field radio_was_on boolean
 ---@field update_channel string "stable" | "beta" | "development"
 ---@field backend_mode string "auto" | "fast" | "compatible"
+---@field live_updates boolean
 
 local DEFAULTS = {
     disable_on_suspend = false,
@@ -19,6 +20,7 @@ local DEFAULTS = {
     radio_was_on = false,
     update_channel = "stable",
     backend_mode = "auto",
+    live_updates = false,
 }
 
 local function shallowCopy(t)
@@ -137,6 +139,17 @@ end
 function BluetoothSettings:setRadioWasOn(radio_was_on)
     if self.data.radio_was_on == radio_was_on then return end
     self.data.radio_was_on = radio_was_on
+    self:write()
+end
+
+--- Live updates while the menu is open (Fast mode only). Experimental and
+--- off by default for the stable release (decision 2026-10-26).
+function BluetoothSettings:getLiveUpdates()
+    return self.data.live_updates or DEFAULTS.live_updates
+end
+
+function BluetoothSettings:toggleLiveUpdates()
+    self.data.live_updates = not self:getLiveUpdates()
     self:write()
 end
 
