@@ -230,7 +230,12 @@ function Devices:pair(callback)
             if callback then callback(false) end
             return
         end
-        self.backend:pair(self.mac)
+        -- Only an explicit false means "not started" (another session is
+        -- running); backends without a return value count as started.
+        if self.backend:pair(self.mac) == false then
+            if callback then callback(false, "busy") end
+            return
+        end
         pollField(self, "paired", true, function(paired_confirmed)
             if not paired_confirmed then
                 if callback then callback(false) end

@@ -181,6 +181,9 @@ end
 -- confirm is backlog, after the stable release (Sabrina, 2026-10-26).
 bluez.PAIR_SESSION_S = 20
 
+-- A field so tests can move time.
+bluez.clock = os.time
+
 --- The shell command for one pairing session, or nil if `mac` isn't a MAC
 --- (it goes into a shell command).
 ---@param mac string
@@ -221,12 +224,24 @@ function bluez.pairLogLines(text)
     return lines
 end
 
+--- Starts a pairing session; false when it didn't start. One session at a
+--- time: two at once both claimed the default agent and mixed their output
+--- (reader log 2026-10-26 10:23:09 and 10:23:11).
+---@param mac string
+---@return boolean
 function bluez:pair(mac)
     local cmd = bluez.pairCommand(mac)
     if not cmd then
         logger.warn("Bluez: not pairing, not a MAC: " .. Parse.maskMac(tostring(mac)))
-        return
+        return false
     end
+    local now = bluez.clock()
+    if bluez.pair_busy_until and now < bluez.pair_busy_until then
+        logger.info("Bluez: a pairing session is still running, not starting another for " .. Parse.maskMac(mac))
+        return false
+    end
+    -- The session's own cap (PAIR_SESSION_S + 5).
+    bluez.pair_busy_until = now + bluez.PAIR_SESSION_S + 5
     logger.dbg("Bluez: Pairing with Bluetooth device (agent session " .. bluez.PAIR_SESSION_S .. "s): " .. Parse.maskMac(mac))
     local out = os.tmpname()
     -- Not run(): its >/dev/null would come last and win over this file.
@@ -241,6 +256,7 @@ function bluez:pair(mac)
             logger.info("Bluez: pair session:", line)
         end
     end)
+    return true
 end
 
 function bluez:unpair(mac)

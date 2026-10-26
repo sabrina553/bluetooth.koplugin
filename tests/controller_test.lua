@@ -498,5 +498,17 @@ do
     check(ok == false and reason == "superseded", "superseded enable: reports why, got " .. tostring(reason))
 end
 
+-- Pairing while another session runs: the menu is told "busy", not a
+-- failed pairing.
+do
+    local Devices = require("bluetooth/controller/devices")
+    local dev = Devices:new({ mac = "AA:AA", name = "Phone",
+        backend = { pair = function() return false end },
+        controller = { enableWhenDisabled = function(_, cb) cb(true) end } })
+    local ok, reason
+    dev:pair(function(confirmed, why) ok, reason = confirmed, why end)
+    check(ok == false and reason == "busy", "pair busy: reported as busy, got " .. tostring(reason))
+end
+
 if failures > 0 then os.exit(1) end
 print("controller_test: ok")

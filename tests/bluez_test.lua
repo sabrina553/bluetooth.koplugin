@@ -225,6 +225,25 @@ do
     check("pair log: MACs masked", table.concat(masked, "|"):find("00:11:22:33:44:55", 1, true), nil)
 end
 
+-- One pairing session at a time (reader log 2026-10-26 10:23:09 and 10:23:11).
+do
+    local real_execute, saved_clock = os.execute, Bluez.clock
+    local started = 0
+    os.execute = function(cmd) if cmd:find("bluetoothctl", 1, true) then started = started + 1 end return 0 end
+    local UIManager = require("ui/uimanager")
+    UIManager.scheduleIn = UIManager.scheduleIn or function() end
+    local now = 1000
+    Bluez.clock = function() return now end
+    Bluez.pair_busy_until = nil
+    check("pair: first session starts", Bluez:pair("00:11:22:33:44:55"), true)
+    check("pair: a second one while it runs does not", Bluez:pair("00:11:22:33:44:66"), false)
+    check("pair: only one bluetoothctl started", started, 1)
+    now = now + Bluez.PAIR_SESSION_S + 5
+    check("pair: after the session's cap a new one starts", Bluez:pair("00:11:22:33:44:66"), true)
+    check("pair: not a MAC does not start or block", Bluez:pair("nope"), false)
+    os.execute, Bluez.clock, Bluez.pair_busy_until = real_execute, saved_clock, nil
+end
+
 if failures > 0 then
     print(failures .. " failure(s)")
     os.exit(1)

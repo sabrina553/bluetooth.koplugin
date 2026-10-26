@@ -70,7 +70,7 @@ function pocketbook:setTransport(transport)
 end
 
 function pocketbook:pair(mac)
-    self.transport:pair(mac)
+    return self.transport:pair(mac)
 end
 
 function pocketbook:unpair(mac)

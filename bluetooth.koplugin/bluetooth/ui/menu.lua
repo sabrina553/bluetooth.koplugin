@@ -412,8 +412,15 @@ function BluetoothMenu:performToggle(dev, action, touchmenu_instance)
     }
     UIManager:show(msg)
 
-    dev[action.method](dev, function(confirmed)
+    dev[action.method](dev, function(confirmed, reason)
         UIManager:close(msg)
+        if reason == "busy" then
+            UIManager:show(InfoMessage:new{
+                text = _("Another pairing is still running. Try again in a few seconds."),
+                timeout = 3,
+            })
+            return self:refresh(touchmenu_instance)
+        end
         -- The toast reads dev, not a fresh lookup: pollField confirmed the
         -- result on this object, while a poll mid-action can install a newer
         -- one read before the action finished (it said "Disconnected" after a

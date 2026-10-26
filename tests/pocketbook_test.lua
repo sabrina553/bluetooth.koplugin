@@ -23,7 +23,7 @@ end
 local own = { new = true, status = true, enable = true, disable = true, capture = true, lastTimedOut = true, pairedMacs = true,
     snapshotScript = true, runAsync = true, devicesFromSnapshot = true, readStatus = true,
     shellSucceeds = true, readFailed = true, timeoutStyle = true, timeoutPrefix = true,
-    pairCommand = true, pairLogLines = true, setTransport = true, readInfo = true }
+    pairCommand = true, pairLogLines = true, clock = true, setTransport = true, readInfo = true }
 
 for name, value in pairs(Bluez) do
     if type(value) == "function" and not own[name] and type(PocketBook[name]) ~= "function" then
