@@ -211,6 +211,27 @@ do
     menu.findTouchMenu, menu.checkNow = nil, nil
 end
 
+-- Taps on the Bluetooth switch while the radio is still switching are
+-- ignored quietly: no second toggle, no message.
+do
+    shown = {}
+    local toggles = 0
+    local switching = true
+    menu.controller.isEnabling = function() return switching end
+    menu.controller.isDisabling = function() return false end
+    menu.controller.status = function() end
+    menu.controller.wantsEnabled = function() return true end
+    menu.controller.toggle = function() toggles = toggles + 1 end
+    local item = menu:buildMenuTable()[1]
+    item.callback(nil)
+    item.callback(nil)
+    check("still switching: taps ignored", toggles, 0)
+    check("still switching: no message", #shown, 0)
+    switching = false
+    item.callback(nil)
+    check("done switching: a tap toggles", toggles, 1)
+end
+
 if failures > 0 then
     print(failures .. " failure(s)")
     os.exit(1)
