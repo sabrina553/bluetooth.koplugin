@@ -193,6 +193,34 @@ function bluez.pairCommand(mac)
         :format(mac, bluez.PAIR_SESSION_S, bluez.timeoutPrefix(bluez.PAIR_SESSION_S + 5))
 end
 
+-- Lines from the pairing session worth keeping: which agent answered, what
+-- the other side asked for, and how it ended. A phone failing to pair left
+-- nothing to go on (reader log 2026-10-26 10:15).
+local PAIR_LOG_PATTERNS = { "[Aa]gent", "[Aa]ttempting", "[Rr]equest", "[Pp]asskey", "[Cc]onfirm", "[Ff]ailed",
+    "[Pp]airing successful", "[Pp]aired: ", "[Ee]rror", "[Nn]ot available", "[Aa]uthenticat" }
+
+--- The session's lines worth logging, masked. Pure, for tests.
+---@param text string
+---@return string[]
+function bluez.pairLogLines(text)
+    local lines = {}
+    -- bluetoothctl repaints its prompt with escape codes and \r. The prompt
+    -- shows a device name ("[Someone's iPhone]#"), so it goes, and so does
+    -- any 6-digit pairing code: logs are shared with testers.
+    text = (text or ""):gsub("\27%[[%d;]*%a", ""):gsub("\r", "\n")
+    for line in text:gmatch("[^\n]+") do
+        line = line:gsub("%[[^%]]*%]#%s*", ""):gsub("^%s+", "")
+        for _, pattern in ipairs(PAIR_LOG_PATTERNS) do
+            if line:find(pattern) then
+                line = Parse.maskMac(line):gsub("%f[%d]%d%d%d%d%d%d%f[%D]", "NNNNNN")
+                table.insert(lines, line)
+                break
+            end
+        end
+    end
+    return lines
+end
+
 function bluez:pair(mac)
     local cmd = bluez.pairCommand(mac)
     if not cmd then
@@ -200,7 +228,19 @@ function bluez:pair(mac)
         return
     end
     logger.dbg("Bluez: Pairing with Bluetooth device (agent session " .. bluez.PAIR_SESSION_S .. "s): " .. Parse.maskMac(mac))
-    run(cmd)
+    local out = os.tmpname()
+    -- Not run(): its >/dev/null would come last and win over this file.
+    os.execute(cmd .. " >" .. out .. " 2>&1 &")
+    -- Read once the session has ended (capped at PAIR_SESSION_S + 5).
+    require("ui/uimanager"):scheduleIn(bluez.PAIR_SESSION_S + 7, function()
+        local f = io.open(out, "r")
+        local text = f and f:read("*a") or ""
+        if f then f:close() end
+        os.remove(out)
+        for _, line in ipairs(bluez.pairLogLines(text)) do
+            logger.info("Bluez: pair session:", line)
+        end
+    end)
 end
 
 function bluez:unpair(mac)

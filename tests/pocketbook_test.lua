@@ -21,7 +21,7 @@ end
 -- capture, lastTimedOut, pairedMacs, the timeout and snapshot helpers are helpers inside the Bluez backend, not part of the backend API.
 local own = { new = true, status = true, enable = true, disable = true, capture = true, lastTimedOut = true, pairedMacs = true,
     snapshotScript = true, runAsync = true, devicesFromSnapshot = true, readStatus = true,
-    shellSucceeds = true, readFailed = true, timeoutStyle = true, timeoutPrefix = true, pairCommand = true }
+    shellSucceeds = true, readFailed = true, timeoutStyle = true, timeoutPrefix = true, pairCommand = true, pairLogLines = true }
 
 for name, value in pairs(Bluez) do
     if type(value) == "function" and not own[name] and type(PocketBook[name]) ~= "function" then
