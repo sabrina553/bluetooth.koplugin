@@ -188,23 +188,37 @@ detectWith("nothing works")
 check("timeout: none available runs the command bare", Bluez.timeoutPrefix(5), "")
 Bluez.timeout_style = "k"
 
--- Pairing keeps one bluetoothctl session open with an agent (fix/pair-agent).
+-- Pairing keeps one bluetoothctl session open with an agent (fix/pair-agent)
+-- and ends it as soon as bluetoothctl reports a result.
 do
     local saved_style, saved_s = Bluez.timeout_style, Bluez.PAIR_SESSION_S
     Bluez.timeout_style = "k"
-    local cmd = Bluez.pairCommand("00:11:22:33:44:55")
+    local cmd = Bluez.pairCommand("00:11:22:33:44:55", "/tmp/lua_test")
     check("pair: capped a little past the session, agent set at start",
-        cmd and cmd:find("| timeout %-k 1 25 bluetoothctl %-%-agent NoInputNoOutput$") ~= nil, true)
-    check("pair: not a MAC is refused", Bluez.pairCommand("00:11:22:33:44:55; reboot"), nil)
-    check("pair: nil is refused", Bluez.pairCommand(nil), nil)
+        cmd and cmd:find("| timeout %-k 1 25 bluetoothctl %-%-agent NoInputNoOutput; echo @@done %) >/tmp/lua_test 2>&1$") ~= nil, true)
+    check("pair: not a MAC is refused", Bluez.pairCommand("00:11:22:33:44:55; reboot", "/tmp/x"), nil)
+    check("pair: nil is refused", Bluez.pairCommand(nil, "/tmp/x"), nil)
+    check("pair: an odd output path is refused", Bluez.pairCommand("00:11:22:33:44:55", "/tmp/x; reboot"), nil)
 
-    -- Run it for real with cat standing in for bluetoothctl and no wait, to
-    -- see exactly what bluetoothctl would read.
-    Bluez.timeout_style, Bluez.PAIR_SESSION_S = "none", 0
-    local h = io.popen((Bluez.pairCommand("00:11:22:33:44:55"):gsub("bluetoothctl %-%-agent NoInputNoOutput$", "cat")))
-    local fed = h:read("*a"); h:close()
-    check("pair: default agent, pair, quit, in order", fed,
-        "default-agent\npair 00:11:22:33:44:55\nquit\n")
+    check("pair result: success", Bluez.pairResult("...\nPairing successful\n"), true)
+    check("pair result: failure", Bluez.pairResult("Failed to pair: org.bluez.Error.ConnectionAttemptFailed\n"), false)
+    check("pair result: cut off", Bluez.pairResult("Attempting to pair\n"), nil)
+
+    -- Run the real script with awk standing in for bluetoothctl: it echoes
+    -- what it is fed, answers the pair with success, and stops at quit. The
+    -- session must end within a few seconds, not after PAIR_SESSION_S.
+    Bluez.timeout_style, Bluez.PAIR_SESSION_S = "none", 20
+    local out = os.tmpname()
+    local script = Bluez.pairCommand("00:11:22:33:44:55", out):gsub("bluetoothctl %-%-agent NoInputNoOutput",
+        [[awk '{print; fflush()} /^pair /{print "Pairing successful"; fflush()} /^quit/{exit}']])
+    local started = os.time()
+    os.execute(script)
+    local took = os.time() - started
+    local f = io.open(out, "r"); local text = f and f:read("*a") or ""; if f then f:close() end
+    os.remove(out)
+    check("pair: fed default agent, pair, quit in order",
+        text:find("default%-agent\npair 00:11:22:33:44:55\nPairing successful\nquit\n@@done") ~= nil, true)
+    check("pair: session ends once it has a result, took " .. took .. "s", took <= 4, true)
     Bluez.timeout_style, Bluez.PAIR_SESSION_S = saved_style, saved_s
 end
 

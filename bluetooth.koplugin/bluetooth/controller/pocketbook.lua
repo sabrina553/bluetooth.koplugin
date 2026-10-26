@@ -69,8 +69,8 @@ function pocketbook:setTransport(transport)
     self.transport = transport
 end
 
-function pocketbook:pair(mac)
-    return self.transport:pair(mac)
+function pocketbook:pair(mac, on_done)
+    return self.transport:pair(mac, on_done)
 end
 
 function pocketbook:unpair(mac)

@@ -230,15 +230,16 @@ function Devices:pair(callback)
             if callback then callback(false) end
             return
         end
-        -- Only an explicit false means "not started" (another session is
-        -- running); backends without a return value count as started.
-        if self.backend:pair(self.mac) == false then
-            if callback then callback(false, "busy") end
-            return
-        end
-        pollField(self, "paired", true, function(paired_confirmed)
-            if not paired_confirmed then
-                if callback then callback(false) end
+        -- The first answer wins: the session's own result (a failure is
+        -- known within a second, not after the whole confirm budget) or the
+        -- paired poll. Only an explicit false from pair() means "not
+        -- started" (another session is running).
+        local settled = false
+        local function settle(ok, reason)
+            if settled then return end
+            settled = true
+            if not ok then
+                if callback then callback(false, reason) end
                 return
             end
             self:connect(function(connected_confirmed)
@@ -248,6 +249,20 @@ function Devices:pair(callback)
                 end
                 self:trust(callback)
             end)
+        end
+        local started = self.backend:pair(self.mac, function(result)
+            if result == false then
+                logger.info("Devices: pairing " .. Parse.maskMac(self.mac) .. " failed, see the pair session lines")
+                settle(false)
+            end
+        end)
+        if started == false then
+            settled = true
+            if callback then callback(false, "busy") end
+            return
+        end
+        pollField(self, "paired", true, function(paired_confirmed)
+            settle(paired_confirmed)
         end, nil, nil, Poll.PAIR_ATTEMPTS)
     end)
 end

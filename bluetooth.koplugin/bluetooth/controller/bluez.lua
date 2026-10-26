@@ -172,7 +172,9 @@ end
 -- (a phone asks to confirm). A one-shot `bluetoothctl pair` exits at once and
 -- takes its agent with it, so phones failed while keyboards and remotes,
 -- which ask nothing, paired fine (vault Docs/D-Bus findings, 2026-10-13).
--- One session runs the agent, pairs, and stays open PAIR_SESSION_S.
+-- One session runs the agent, pairs, and stays open until bluetoothctl
+-- reports the result, at most PAIR_SESSION_S. Ending early matters: a
+-- failed pairing held the next one off for 25 s (reader log 2026-10-26 10:37).
 -- bluetoothctl registers its own agent at start, so the capability goes on
 -- the command line: a later `agent NoInputNoOutput` is refused ("Agent is
 -- already registered") and the default KeyboardDisplay agent then waits for
@@ -184,16 +186,37 @@ bluez.PAIR_SESSION_S = 20
 -- A field so tests can move time.
 bluez.clock = os.time
 
+-- What bluetoothctl prints when a pairing ends, either way.
+local PAIR_RESULT = "Pairing successful|Failed to pair"
+
 --- The shell command for one pairing session, or nil if `mac` isn't a MAC
---- (it goes into a shell command).
+--- (it goes into a shell command). Output goes to `out`; the feeding side
+--- checks it once a second and quits as soon as a result is there, and
+--- "@@done" marks the end of the session.
 ---@param mac string
+---@param out string a path from os.tmpname()
 ---@return string|nil
-function bluez.pairCommand(mac)
+function bluez.pairCommand(mac, out)
     if type(mac) ~= "string" or not mac:match("^%x%x:%x%x:%x%x:%x%x:%x%x:%x%x$") then
         return nil
     end
-    return ("(printf 'default-agent\\npair %s\\n'; sleep %d; printf 'quit\\n') | %sbluetoothctl --agent NoInputNoOutput")
-        :format(mac, bluez.PAIR_SESSION_S, bluez.timeoutPrefix(bluez.PAIR_SESSION_S + 5))
+    if type(out) ~= "string" or not out:match("^[%w%._/%-]+$") then
+        return nil
+    end
+    local feed = ("printf 'default-agent\\npair %s\\n'; i=0; while [ $i -lt %d ]; do sleep 1; "
+        .. "grep -q -E '%s' %s && break; i=$((i+1)); done; printf 'quit\\n'")
+        :format(mac, bluez.PAIR_SESSION_S, PAIR_RESULT, out)
+    return ("( (%s) | %sbluetoothctl --agent NoInputNoOutput; echo @@done ) >%s 2>&1")
+        :format(feed, bluez.timeoutPrefix(bluez.PAIR_SESSION_S + 5), out)
+end
+
+--- How a session ended: true, false, or nil when it said neither (cut off).
+---@param text string
+---@return boolean|nil
+function bluez.pairResult(text)
+    if (text or ""):find("Pairing successful", 1, true) then return true end
+    if (text or ""):find("Failed to pair", 1, true) then return false end
+    return nil
 end
 
 -- Lines from the pairing session worth keeping: which agent answered, what
@@ -226,36 +249,47 @@ end
 
 --- Starts a pairing session; false when it didn't start. One session at a
 --- time: two at once both claimed the default agent and mixed their output
---- (reader log 2026-10-26 10:23:09 and 10:23:11).
+--- (reader log 2026-10-26 10:23:09 and 10:23:11). `on_done(result)` runs
+--- when the session ends, with bluez.pairResult's answer.
 ---@param mac string
+---@param on_done fun(result: boolean|nil)|nil
 ---@return boolean
-function bluez:pair(mac)
-    local cmd = bluez.pairCommand(mac)
+function bluez:pair(mac, on_done)
+    local out = os.tmpname()
+    local cmd = bluez.pairCommand(mac, out)
     if not cmd then
+        os.remove(out)
         logger.warn("Bluez: not pairing, not a MAC: " .. Parse.maskMac(tostring(mac)))
         return false
     end
     local now = bluez.clock()
     if bluez.pair_busy_until and now < bluez.pair_busy_until then
         logger.info("Bluez: a pairing session is still running, not starting another for " .. Parse.maskMac(mac))
+        os.remove(out)
         return false
     end
     -- The session's own cap (PAIR_SESSION_S + 5).
     bluez.pair_busy_until = now + bluez.PAIR_SESSION_S + 5
     logger.dbg("Bluez: Pairing with Bluetooth device (agent session " .. bluez.PAIR_SESSION_S .. "s): " .. Parse.maskMac(mac))
-    local out = os.tmpname()
-    -- Not run(): its >/dev/null would come last and win over this file.
-    os.execute(cmd .. " >" .. out .. " 2>&1 &")
-    -- Read once the session has ended (capped at PAIR_SESSION_S + 5).
-    require("ui/uimanager"):scheduleIn(bluez.PAIR_SESSION_S + 7, function()
+    -- Not run(): its >/dev/null would come last and win over the file.
+    os.execute(cmd .. " &")
+    local UIManager = require("ui/uimanager")
+    local deadline = now + bluez.PAIR_SESSION_S + 7
+    local function check()
         local f = io.open(out, "r")
         local text = f and f:read("*a") or ""
         if f then f:close() end
+        if not text:find("@@done", 1, true) and bluez.clock() < deadline then
+            return UIManager:scheduleIn(1, check)
+        end
         os.remove(out)
+        bluez.pair_busy_until = nil
         for _, line in ipairs(bluez.pairLogLines(text)) do
             logger.info("Bluez: pair session:", line)
         end
-    end)
+        if on_done then on_done(bluez.pairResult(text)) end
+    end
+    UIManager:scheduleIn(1, check)
     return true
 end
 

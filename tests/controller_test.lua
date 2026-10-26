@@ -510,5 +510,26 @@ do
     check(ok == false and reason == "busy", "pair busy: reported as busy, got " .. tostring(reason))
 end
 
+-- A pairing session that reports failure ends the wait at once, rather than
+-- after the whole confirm budget (about 22 s).
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    local Devices = require("bluetooth/controller/devices")
+    local finish
+    local dev = Devices:new({ mac = "AA:AA", name = "Phone",
+        backend = {
+            pair = function(_, _, on_done) finish = on_done; return true end,
+            info = function() return "Device AA:AA (public)\n\tPaired: no\n" end,
+        },
+        controller = { enableWhenDisabled = function(_, cb) cb(true) end } })
+    local results = {}
+    dev:pair(function(confirmed) table.insert(results, confirmed) end)
+    check("pair failure: still waiting before the session ends", #results, 0)
+    finish(false)
+    check("pair failure: reported at once", #results == 1 and results[1] == false, true)
+    drain()
+    check("pair failure: the poll ending later does not report twice", #results, 1)
+end
+
 if failures > 0 then os.exit(1) end
 print("controller_test: ok")
