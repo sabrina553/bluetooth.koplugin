@@ -218,7 +218,8 @@ end
 do
     local Devices = require("bluetooth/controller/devices")
     local c = build(true)
-    c.settings = { getStarredOnWake = function() return false end, getLastOnWake = function() return true end }
+    c.settings = { getStarredOnWake = function() return false end, getLastOnWake = function() return true end,
+        setRadioWasOn = function() end }
     c.device_store.getStarred = function() return {} end
     fake.knownDevices = function()
         return { Devices:new({ mac = "AA:AA", name = "Remote", paired = true, connected = true, controller = c }) }
@@ -358,6 +359,26 @@ do
     fake.readStatus = nil
     local c2 = build(false)
     check(c2:statusCached() == false, "cached status: backend without a background check falls back")
+end
+
+-- Restore at boot: the menu toggle and the suspend snapshot both save the
+-- radio state to disk; a plain disable (disable-on-suspend) does not.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    local c = build(false)
+    local saved = {}
+    c.settings = { setRadioWasOn = function(_, on) table.insert(saved, on) end }
+    c:toggle()
+    check(saved[#saved] == true, "radio state: toggle on saves true")
+    c:snapshotBeforeSuspend()
+    check(saved[#saved] == true, "radio state: suspend mid-enable saves true")
+    c:toggle()
+    check(saved[#saved] == false, "radio state: toggle off saves false")
+    c:enable()
+    local before = #saved
+    c:disable()
+    check(#saved == before, "radio state: plain disable saves nothing")
+    drain()
 end
 
 if failures > 0 then os.exit(1) end
