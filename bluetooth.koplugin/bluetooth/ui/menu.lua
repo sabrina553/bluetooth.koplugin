@@ -248,6 +248,11 @@ end
 -- plugin switching the radio), see the 2026-10-13 session note.
 local MENU_POLL_S = 3
 
+-- A first look soon after opening, so a menu closed before the first poll
+-- isn't mistaken for a changed TouchMenu layout (WARN on the reader for a
+-- menu simply closed within 3 s, 2026-10-26 10:37:48).
+local FIRST_LOOK_S = 0.5
+
 function BluetoothMenu:getTopMenu()
     self:refresh()
     self:startPolling()
@@ -279,9 +284,9 @@ function BluetoothMenu:startPolling()
         end
         if not self:findTouchMenu() then
             -- Closed. Settings and About do not count: back returns to us.
-            -- Another page showing is normal, see MenuFind.anyOpen. No menu at
-            -- all on the first poll may mean KOReader's layout changed (or the
-            -- menu was closed within MENU_POLL_S), so log the layout.
+            -- Another page showing is normal, see MenuFind.anyOpen. Never
+            -- found, not even at the first look, may mean KOReader's layout
+            -- changed, so log the layout.
             if seen then
                 logger.dbg("Bluetooth: menu closed, polling stopped")
             elseif MenuFind.anyOpen(UIManager._window_stack) then
@@ -301,6 +306,11 @@ function BluetoothMenu:startPolling()
         UIManager:scheduleIn(MENU_POLL_S, tick)
     end
     self:updateLiveMonitor(token)
+    UIManager:scheduleIn(FIRST_LOOK_S, function()
+        if self._poll_token == token and self:findTouchMenu() then
+            seen = true
+        end
+    end)
     UIManager:scheduleIn(MENU_POLL_S, tick)
 end
 

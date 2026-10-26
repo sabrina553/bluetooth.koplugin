@@ -182,6 +182,35 @@ do
     check("live: stopLiveMonitor (suspend, close) stops it", monitors[4].stopped, true)
 end
 
+-- Closing the menu before the first poll is not a layout change: the first
+-- look finds it, so the poll logs "closed" at debug level, not WARN.
+do
+    local UIManager = require("ui/uimanager")
+    local logger = require("logger")
+    local saved_schedule, saved_warn = UIManager.scheduleIn, logger.warn
+    local tasks, warned = {}, 0
+    UIManager.scheduleIn = function(_, s, fn) table.insert(tasks, { s = s, fn = fn }) end
+    UIManager._window_stack = {}
+    logger.warn = function() warned = warned + 1 end
+    local open = true
+    menu.findTouchMenu = function() return open end
+    menu.checkNow = function() end
+    menu:startPolling()
+    table.sort(tasks, function(a, b) return a.s < b.s end)
+    tasks[1].fn() -- first look, menu open
+    open = false  -- closed before the first poll
+    tasks[2].fn() -- first poll
+    check("quick close: no WARN", warned, 0)
+    -- Never found at all: that one still warns.
+    tasks, warned, open = {}, 0, false
+    menu:startPolling()
+    table.sort(tasks, function(a, b) return a.s < b.s end)
+    tasks[1].fn(); tasks[2].fn()
+    check("never found: WARN kept", warned, 1)
+    UIManager.scheduleIn, logger.warn = saved_schedule, saved_warn
+    menu.findTouchMenu, menu.checkNow = nil, nil
+end
+
 if failures > 0 then
     print(failures .. " failure(s)")
     os.exit(1)
