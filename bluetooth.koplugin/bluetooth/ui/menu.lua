@@ -259,7 +259,7 @@ function BluetoothMenu:deviceSignature()
     for _, dev in ipairs(self.controller.known_devices or {}) do
         parts[#parts + 1] = table.concat({
             dev.mac, dev.name or "", tostring(dev.paired), tostring(dev.connected),
-            tostring(dev.starred),
+            tostring(dev.starred), tostring(dev.blocked),
         }, "|")
     end
     return table.concat(parts, ";")
@@ -359,6 +359,16 @@ end
 ---@param action table one of the TOGGLE_ACTIONS entries
 ---@param touchmenu_instance any
 function BluetoothMenu:performToggle(dev, action, touchmenu_instance)
+    -- BlueZ refuses a blocked device's input, though the remote can still
+    -- bring up a link that reads as connected (reader log 2026-10-26 09:35),
+    -- so a connect would "succeed" and do nothing.
+    if action == TOGGLE_ACTIONS.connect and dev.blocked then
+        UIManager:show(InfoMessage:new{
+            text = dev.name .. _(" is blocked. Unblock it first: hold the device for options."),
+            timeout = 3,
+        })
+        return
+    end
     local msg = InfoMessage:new{
         text = dev[action.field] and action.inactive_text or action.active_text
     }
@@ -398,12 +408,14 @@ function BluetoothMenu:pairedDevices(menu, knownDevices)
             -- Insert the menu item
             if dev.paired == true then
                 table.insert(menu, {
-                    text = (dev.starred and "★ " or "") .. dev.name,
+                    text = (dev.starred and "★ " or "") .. dev.name .. (dev.blocked and _(" (blocked)") or ""),
                     callback = function(touchmenu_instance)
                         self:performToggle(dev, TOGGLE_ACTIONS.connect, touchmenu_instance)
                     end,
+                    -- A blocked device's link carries no input, so it isn't
+                    -- shown as connected.
                     checked_func = function()
-                        return dev.connected
+                        return dev.connected and not dev.blocked
                     end,
                     hold_callback = function(touchmenu_instance)
                         self:showDeviceActions(dev, touchmenu_instance)
