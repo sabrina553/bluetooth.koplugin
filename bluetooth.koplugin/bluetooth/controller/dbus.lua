@@ -17,16 +17,15 @@ local function safe(word)
     return type(word) == "string" and word:match("^[%w%._/:%-]+$") ~= nil
 end
 
---- A `dbus-send --print-reply` command line, or nil if an argument is unsafe.
----@param service string e.g. "org.bluez"
----@param path string object path
----@param method string interface and member, e.g. "org.freedesktop.DBus.Properties.Get"
----@param ... string typed arguments, e.g. "string:org.bluez.Adapter1"
+--- A `dbus-send --print-reply` command line with its own reply timeout, for
+--- calls that take longer than REPLY_TIMEOUT_MS (Device1.Connect took 4.4 s
+--- on the reader, vault Docs/D-Bus findings).
+---@param timeout_ms integer
 ---@return string|nil
-function Dbus.command(service, path, method, ...)
+function Dbus.commandWithTimeout(timeout_ms, service, path, method, ...)
     local parts = {
         "dbus-send", "--system", "--print-reply",
-        "--reply-timeout=" .. Dbus.REPLY_TIMEOUT_MS,
+        "--reply-timeout=" .. math.floor(timeout_ms),
         "--dest=" .. tostring(service), tostring(path), tostring(method),
     }
     for _, word in ipairs({ service, path, method, ... }) do
@@ -38,6 +37,16 @@ function Dbus.command(service, path, method, ...)
         table.insert(parts, arg)
     end
     return table.concat(parts, " ")
+end
+
+--- A `dbus-send --print-reply` command line, or nil if an argument is unsafe.
+---@param service string e.g. "org.bluez"
+---@param path string object path
+---@param method string interface and member, e.g. "org.freedesktop.DBus.Properties.Get"
+---@param ... string typed arguments, e.g. "string:org.bluez.Adapter1"
+---@return string|nil
+function Dbus.command(service, path, method, ...)
+    return Dbus.commandWithTimeout(Dbus.REPLY_TIMEOUT_MS, service, path, method, ...)
 end
 
 --- The BlueZ object path of a device, or nil if `mac` isn't a MAC.
