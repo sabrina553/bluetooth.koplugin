@@ -150,6 +150,8 @@ function controller:snapshotBeforeSuspend(callback)
     -- Intent, not the reading: a suspend mid-enable sees the radio still off,
     -- and resume would then leave it off (seen 2026-10-13, quick suspend cycles).
     self.was_enabled_before_suspend = self:wantsEnabled()
+    -- On disk too, so a cold start after a shutdown or flat battery restores it.
+    if self.settings then self.settings:setRadioWasOn(self.was_enabled_before_suspend) end
     self.connected_at_suspend = nil
     if not self.is_enabled then
         logger.dbg("Bluetooth: radio is off at suspend, nothing to snapshot")
@@ -439,12 +441,16 @@ function controller:disable(callback)
     end)
 end
 
+--- The user's own switch: its intent is saved as the state to restore at a
+--- cold start. disable() alone is not, since disable-on-suspend uses it.
 function controller:toggle(callback)
     self:status()
-    if self:wantsEnabled() then
-        return self:disable(callback)
-    else
+    local turn_on = not self:wantsEnabled()
+    if self.settings then self.settings:setRadioWasOn(turn_on) end
+    if turn_on then
         return self:enable(callback)
+    else
+        return self:disable(callback)
     end
 end
 

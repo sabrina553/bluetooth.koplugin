@@ -70,17 +70,25 @@ function Bluetooth:init()
     -- init also runs on every view change (file manager <-> book), where
     -- nothing woke up: restoring then switched Bluetooth back on after the
     -- user had turned it off. Wake-ups are handled by onResume.
+    -- A cold start restores the last state the user chose or had at suspend,
+    -- like a wake does (decision 2026-10-26), after the same settle delay so
+    -- netagent and bluetoothd are up.
     if Session.isColdStart() then
-        self:restoreBluetoothState(false)
+        local was_on = self.settings:getRadioWasOn()
+        logger.dbg("Bluetooth.koplugin: Cold start, restoring Bluetooth (was on: " .. tostring(was_on) .. ") in " .. WAKE_SETTLE_S .. "s")
+        UIManager:scheduleIn(WAKE_SETTLE_S, function()
+            self:restoreBluetoothState(was_on)
+        end)
     end
 
     logger.dbg("Bluetooth.koplugin: Initialized")
 end
 
 --- Reconnects devices after a start or wake-up. The radio is only switched
---- on again (`allow_enable`) to undo our own disable-on-suspend; it is never
---- turned on just because the reader started or woke.
---- Decision: 2026-10-13 session note (auto-connect, never auto-enable).
+--- on again (`allow_enable`) to restore the last state the user left it in
+--- (menu or suspend); it is never turned on just because the reader started
+--- or woke. Decisions: 2026-10-13 (auto-connect, never auto-enable) and
+--- 2026-10-26 (a cold start restores the last state) session notes.
 ---@param allow_enable boolean
 function Bluetooth:restoreBluetoothState(allow_enable)
     local function reconnect()
