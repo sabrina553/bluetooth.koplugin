@@ -39,6 +39,9 @@ local controller = require("bluetooth/controller/controller")
 
 local failures = 0
 local function check(cond, message)
+    -- A string here means a check(description, actual, expected) call from
+    -- the other test style, which would always pass (it did, 2026-10-26).
+    assert(type(cond) ~= "string", "check(cond, message) called with a description first: " .. tostring(cond))
     if not cond then
         failures = failures + 1
         print("FAIL " .. message)
@@ -524,17 +527,17 @@ do
         controller = { enableWhenDisabled = function(_, cb) cb(true) end } })
     local results = {}
     dev:pair(function(confirmed) table.insert(results, confirmed) end)
-    check("pair failure: still waiting before the session ends", #results, 0)
+    check(#results == 0, "pair failure: still waiting before the session ends")
     finish(false)
-    check("pair failure: reported at once", #results == 1 and results[1] == false, true)
+    check(#results == 1 and results[1] == false, "pair failure: reported at once")
     local warned = 0
     local logger = require("logger")
     local saved_warn = logger.warn
     logger.warn = function() warned = warned + 1 end
     drain()
     logger.warn = saved_warn
-    check("pair failure: the poll ending later does not report twice", #results, 1)
-    check("pair failure: the leftover poll stops without a WARN", warned, 0)
+    check(#results == 1, "pair failure: the poll ending later does not report twice")
+    check(warned == 0, "pair failure: the leftover poll stops without a WARN, got " .. warned)
 end
 
 if failures > 0 then os.exit(1) end
