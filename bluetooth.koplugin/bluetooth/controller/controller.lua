@@ -276,11 +276,12 @@ end
 local ENABLE_DISABLE_DEBOUNCE_S = 0.15
 
 ---@param expected boolean 
----@param callback fun(confirmed: boolean)|nil 
+---@param callback fun(confirmed: boolean, reason: string|nil)|nil 
 ---@param attempt integer|nil internal, do not pass
 --- The callback always fires exactly once: true if confirmed, false if it
 --- timed out or a newer enable/disable superseded this call (the newer call
---- decides the final state). Dropping it silently left connect/scan waiting
+--- decides the final state). A superseded call also passes "superseded", so
+--- callers can tell a suspend replacing an enable from a radio that failed. Dropping it silently left connect/scan waiting
 --- forever after a suspend/resume.
 ---@param generation integer the poll generation this call belongs to, captured
 ---  by enable()/disable() at the moment they started polling. If a newer
@@ -290,7 +291,7 @@ local ENABLE_DISABLE_DEBOUNCE_S = 0.15
 local function pollField(self, field, expected, callback, attempt, generation)
     if generation ~= self._poll_generation then
         logger.dbg("Bluetooth: pollField for " .. field .. " superseded by a newer enable/disable call, stopping")
-        if callback then callback(false) end
+        if callback then callback(false, "superseded") end
         return
     end
 
@@ -305,7 +306,7 @@ local function pollField(self, field, expected, callback, attempt, generation)
     -- here too in case a newer enable/disable call landed while it ran.
     if generation ~= self._poll_generation then
         logger.dbg("Bluetooth: pollField for " .. field .. " superseded by a newer enable/disable call, stopping")
-        if callback then callback(false) end
+        if callback then callback(false, "superseded") end
         return
     end
 
@@ -401,7 +402,7 @@ end
 -- budget as pollField and sends anyway, since a stuck radio is worse.
 local function waitForOff(self, generation, send, callback, attempt)
     if generation ~= self._poll_generation then
-        if callback then callback(false) end
+        if callback then callback(false, "superseded") end
         return
     end
     attempt = attempt or 1
@@ -431,12 +432,12 @@ function controller:enable(callback)
     self._enabling_generation = my_generation
     local release = Standby.hold()
     local user_callback = callback
-    callback = function(confirmed)
+    callback = function(confirmed, reason)
         release()
         if self._enabling_generation == my_generation then
             self._enabling_generation = nil
         end
-        if user_callback then user_callback(confirmed) end
+        if user_callback then user_callback(confirmed, reason) end
     end
 
     local function send()
@@ -447,7 +448,7 @@ function controller:enable(callback)
     UIManager:scheduleIn(ENABLE_DISABLE_DEBOUNCE_S, function()
         if my_generation ~= self._poll_generation then
             logger.dbg("Bluetooth: enable() superseded before its command was sent, skipping")
-            if callback then callback(false) end
+            if callback then callback(false, "superseded") end
             return
         end
         if self._disable_sent then

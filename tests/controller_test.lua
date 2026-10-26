@@ -485,5 +485,18 @@ do
     check(connects == 1, "wake: released device reconnects, got " .. connects)
 end
 
+-- A suspend that replaces an enable says so, so main.lua logs it at debug
+-- level instead of WARN (reader log 2026-10-26 10:07:51).
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    local c = build(false)
+    fake.status = function() return false end
+    local ok, reason
+    c:enable(function(confirmed, why) ok, reason = confirmed, why end)
+    c:disable()
+    drain()
+    check(ok == false and reason == "superseded", "superseded enable: reports why, got " .. tostring(reason))
+end
+
 if failures > 0 then os.exit(1) end
 print("controller_test: ok")

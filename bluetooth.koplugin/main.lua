@@ -91,6 +91,16 @@ end
 --- 2026-10-26 (a cold start restores the last state) session notes.
 ---@param allow_enable boolean
 function Bluetooth:restoreBluetoothState(allow_enable)
+    -- A suspend that lands while the radio is still coming up replaces the
+    -- enable; the next wake restores it, so that is not a fault (reader log
+    -- 2026-10-26 10:07:51, shown as WARN before).
+    local function notEnabled(reason)
+        if reason == "superseded" then
+            logger.dbg("Bluetooth.koplugin: enable replaced by a newer on/off (suspend?), skipping reconnect")
+        else
+            logger.warn("Bluetooth.koplugin: could not confirm bluetooth enabled, skipping reconnect")
+        end
+    end
     local function reconnect()
         self.controller:knownDevices(function(fresh)
             -- Not fresh: the radio was switched again during the read, so the
@@ -108,11 +118,11 @@ function Bluetooth:restoreBluetoothState(allow_enable)
     -- disable is in flight; reconnecting then would talk to a dying daemon.
     -- enable() supersedes the disable and waits for the radio to go down.
     if self.controller:isDisabling() and allow_enable then
-        self.controller:enable(function(enabled_confirmed)
+        self.controller:enable(function(enabled_confirmed, reason)
             if enabled_confirmed then
                 reconnect()
             else
-                logger.warn("Bluetooth.koplugin: could not confirm bluetooth enabled, skipping reconnect")
+                notEnabled(reason)
             end
         end)
         return
@@ -126,9 +136,9 @@ function Bluetooth:restoreBluetoothState(allow_enable)
         return
     end
 
-    self.controller:enableWhenDisabled(function(enabled_confirmed)
+    self.controller:enableWhenDisabled(function(enabled_confirmed, reason)
         if not enabled_confirmed then
-            logger.warn("Bluetooth.koplugin: could not confirm bluetooth enabled, skipping reconnect")
+            notEnabled(reason)
             return
         end
         reconnect()
