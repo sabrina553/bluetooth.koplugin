@@ -451,5 +451,39 @@ do
     check(ok == true, "untrust: already untrusted calls back true")
 end
 
+-- Held through the controller: setHeld reaches the live device after a
+-- re-read, the store carries it, and wake skips held devices.
+do
+    local Devices = require("bluetooth/controller/devices")
+    local c = build(true)
+    local saved
+    c.device_store.saveAll = function(self, list)
+        self.data = {}
+        for _, d in ipairs(list) do self.data[d.mac] = { mac = d.mac, name = d.name, paired = true, held = d.held, starred = d.starred } end
+        saved = self.data
+    end
+    c.known_devices = { Devices:new({ mac = "AA:AA", name = "Remote", paired = true, controller = c }) }
+    c:setHeld("AA:AA", true)
+    check(c.known_devices[1].held == true and saved["AA:AA"].held == true, "setHeld: live device and store")
+
+    c.known_devices = { Devices:new({ mac = "AA:AA", name = "Remote", paired = true, controller = c }) }
+    c:applyStoredDeviceState()
+    check(c.known_devices[1].held == true, "setHeld: survives a re-read")
+    check(c:devicesFromStore()[1].held == true, "setHeld: devicesFromStore carries held")
+
+    c.settings = { getStarredOnWake = function() return true end, getLastOnWake = function() return true end }
+    c.device_store.getStarred = function() return { { mac = "AA:AA" } } end
+    c.connected_at_suspend = { "AA:AA" }
+    local connects = 0
+    c.known_devices[1].connect = function() connects = connects + 1 end
+    c:reconnectOnWake()
+    check(connects == 0, "wake: held device skipped for starred and last on wake")
+
+    c:setHeld("AA:AA", false)
+    c.connected_at_suspend = { "AA:AA" }
+    c:reconnectOnWake()
+    check(connects == 1, "wake: released device reconnects, got " .. connects)
+end
+
 if failures > 0 then os.exit(1) end
 print("controller_test: ok")

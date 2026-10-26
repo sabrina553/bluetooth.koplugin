@@ -223,7 +223,9 @@ function controller:reconnectOnWake()
 
     for mac in pairs(wanted_macs) do
         local dev = self:getDevice(mac)
-        if dev then
+        if dev and dev.held then
+            logger.dbg("Bluetooth: " .. Parse.maskMac(mac) .. " was disconnected by hand, not reconnecting on wake")
+        elseif dev then
             logger.dbg("Bluetooth: reconnecting to " .. Parse.maskMac(mac) .. " on wake")
             dev:connect()
         else
