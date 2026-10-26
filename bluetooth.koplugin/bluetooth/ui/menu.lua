@@ -87,7 +87,7 @@ end
 -- the same shape: show a "Verb-ing…" toast, perform the toggle, then show
 -- a confirmation or failure toast based on the resulting state.
 -- Confirmation toasts: long enough to read "Connected", short enough not to
--- linger over the redrawn menu (Sabrina, 2026-10-13: 1 s looked ugly).
+-- linger over the redrawn menu.
 local DONE_TOAST_S = 0.25
 
 local TOGGLE_ACTIONS = {
@@ -182,8 +182,7 @@ function BluetoothMenu:buildMenuTable()
             callback = function(touchmenu_instance)
                 -- The PocketBook radio takes about 5 s to switch and looks
                 -- hung, so people tap again; each tap used to flip it back.
-                -- Ignored quietly while a switch is under way (Sabrina,
-                -- 2026-10-26: no extra message).
+                -- Ignored quietly while a switch is under way 
                 if self.controller:isEnabling() or self.controller:isDisabling() then
                     logger.dbg("Bluetooth: radio is still switching, ignoring the tap")
                     return
