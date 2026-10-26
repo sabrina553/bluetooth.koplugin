@@ -147,11 +147,51 @@ function Devices:disconnect(callback)
     pollField(self, "connected", false, callback)
 end
 
+--- Manual disconnect. Held is set first and from intent, so a suspend
+--- mid-action still skips the device on wake, and a failed untrust or
+--- disconnect does not undo what the user asked for. Untrust comes before
+--- the disconnect, or a trusted device can reconnect in the gap.
+--- Decision: vault Docs/Controller design, "Stage 3 plan" (2026-10-13).
+function Devices:disconnectAndHold(callback)
+    self.held = true
+    if self.controller then self.controller:setHeld(self.mac, true) end
+    self:untrust(function(untrusted)
+        if not untrusted then
+            logger.warn("Devices: could not untrust " .. Parse.maskMac(self.mac) .. ", disconnecting anyway")
+        end
+        self:disconnect(callback)
+    end)
+end
+
+--- Manual connect: releases the hold and trusts again, so the device
+--- reconnects by itself as before. A failed trust still connects; the toast
+--- reports the connect.
+function Devices:trustAndConnect(callback)
+    if not self.controller then
+        return self:connect(callback)
+    end
+    self.held = false
+    self.controller:setHeld(self.mac, false)
+    self.controller:enableWhenDisabled(function(enabled_confirmed)
+        if not enabled_confirmed then
+            if callback then callback(false) end
+            return
+        end
+        self:trust(function(trusted)
+            if not trusted then
+                logger.warn("Devices: could not trust " .. Parse.maskMac(self.mac) .. ", connecting anyway")
+            end
+            self:connect(callback)
+        end)
+    end)
+end
+
+--- Only the menu calls this, so it is the manual path; wake uses connect().
 function Devices:toggleConnection(callback)
     if self.connected then
-        return self:disconnect(callback)
+        return self:disconnectAndHold(callback)
     else
-        return self:connect(callback)
+        return self:trustAndConnect(callback)
     end
 end
 

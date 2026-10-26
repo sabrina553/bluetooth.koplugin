@@ -381,5 +381,75 @@ do
     drain()
 end
 
+-- Held devices (vault Docs/Controller design, "Stage 3 plan"): a manual
+-- disconnect holds and untrusts, a manual connect releases and trusts, wake
+-- skips held devices, and the flag survives stale copies and re-reads.
+do
+    local Devices = require("bluetooth/controller/devices")
+    -- A fake radio for one device: actions change its state and are recorded
+    -- in order; info() answers as bluetoothctl would.
+    local function fakeBackend(state, order, refuse)
+        local b = {}
+        local function act(name, field, value)
+            b[name] = function()
+                table.insert(order, name)
+                if not (refuse and refuse[name]) then state[field] = value end
+            end
+        end
+        act("trust", "trusted", true); act("untrust", "trusted", false)
+        act("connect", "connected", true); act("disconnect", "connected", false)
+        b.info = function(_, mac)
+            local yn = function(v) return v and "yes" or "no" end
+            return "Device " .. mac .. " (public)\n\tName: Remote\n\tPaired: yes\n\tTrusted: " .. yn(state.trusted)
+                .. "\n\tBlocked: no\n\tConnected: " .. yn(state.connected) .. "\n"
+        end
+        return b
+    end
+    local function stubController(held_log)
+        return {
+            setHeld = function(_, mac, held) table.insert(held_log, held) end,
+            enableWhenDisabled = function(_, cb) cb(true) end,
+        }
+    end
+
+    -- Disconnect: held first, then untrust, then disconnect.
+    local order, held_log = {}, {}
+    local state = { trusted = true, connected = true }
+    local dev = Devices:new({ mac = "AA:AA", name = "Remote", paired = true, trusted = true, connected = true,
+        backend = fakeBackend(state, order, nil), controller = stubController(held_log) })
+    local ok
+    dev:toggleConnection(function(c) ok = c end)
+    drain()
+    check(ok == true, "held: manual disconnect confirmed")
+    check(held_log[1] == true and dev.held == true, "held: disconnect sets held on the object and the controller")
+    check(table.concat(order, ",") == "untrust,disconnect", "held: untrust before disconnect, got " .. table.concat(order, ","))
+
+    -- Connect: release, trust, connect.
+    order = {}
+    dev.backend = fakeBackend(state, order, nil)
+    dev:toggleConnection(function(c) ok = c end)
+    drain()
+    check(ok == true and dev.connected, "held: manual connect confirmed")
+    check(held_log[2] == false and dev.held == false, "held: connect clears held")
+    check(table.concat(order, ",") == "trust,connect", "held: trust before connect, got " .. table.concat(order, ","))
+
+    -- A failed untrust still disconnects; a failed trust still connects.
+    order = {}
+    state = { trusted = true, connected = true }
+    dev = Devices:new({ mac = "AA:AA", name = "Remote", paired = true, trusted = true, connected = true,
+        backend = fakeBackend(state, order, { untrust = true, trust = true }), controller = stubController({}) })
+    dev:toggleConnection(function(c) ok = c end)
+    drain()
+    check(ok == true and not dev.connected and dev.held, "held: failed untrust still disconnects and holds")
+    dev:toggleConnection(function(c) ok = c end)
+    drain()
+    check(ok == true and dev.connected and not dev.held, "held: failed trust still connects and releases")
+
+    -- Untrust of an untrusted device is a success, as trust of a trusted one is.
+    dev = Devices:new({ mac = "AA:AA", name = "Remote", trusted = false, backend = fakeBackend({}, {}, nil) })
+    dev:untrust(function(c) ok = c end)
+    check(ok == true, "untrust: already untrusted calls back true")
+end
+
 if failures > 0 then os.exit(1) end
 print("controller_test: ok")
