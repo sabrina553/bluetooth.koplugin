@@ -7,12 +7,14 @@ local Version = require("bluetooth/ota/version")
 ---@field disable_on_suspend boolean
 ---@field starred_on_wake boolean
 ---@field last_on_wake boolean
+---@field radio_was_on boolean
 ---@field update_channel string "stable" | "beta" | "development"
 
 local DEFAULTS = {
     disable_on_suspend = false,
     starred_on_wake = false,
     last_on_wake = false,
+    radio_was_on = false,
     update_channel = "stable",
 }
 
@@ -120,6 +122,18 @@ end
 
 function BluetoothSettings:toggleLastOnWake()
     self.data.last_on_wake = not self:getLastOnWake()
+    self:write()
+end
+
+--- Last radio state the user chose (menu) or had at suspend, restored at a
+--- cold start. Decision: 2026-10-26 session note (boot behaves like wake).
+function BluetoothSettings:getRadioWasOn()
+    return self.data.radio_was_on or DEFAULTS.radio_was_on
+end
+
+function BluetoothSettings:setRadioWasOn(radio_was_on)
+    if self.data.radio_was_on == radio_was_on then return end
+    self.data.radio_was_on = radio_was_on
     self:write()
 end
 
