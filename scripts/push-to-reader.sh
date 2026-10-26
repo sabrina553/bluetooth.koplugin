@@ -16,6 +16,13 @@ for t in tests/*_test.lua; do
     luajit "$t" >/dev/null || { echo "FAILED: $t" >&2; exit 1; }
 done
 
+# The reader drops Wi-Fi when it sleeps; fail clearly before the backup pipe
+# (which otherwise ends in a confusing tar error).
+if ! ssh -o BatchMode=yes -o ConnectTimeout=8 "$host" true; then
+    echo "Reader not reachable: wake it, keep it on a page, and retry." >&2
+    exit 1
+fi
+
 mkdir -p "$backup"
 ssh -o BatchMode=yes "$host" "cd $remote_dir && tar -cf - bluetooth.koplugin" | tar -xf - -C "$backup"
 echo "Backed up reader copy to $backup/bluetooth.koplugin"
