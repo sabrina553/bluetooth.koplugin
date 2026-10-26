@@ -232,13 +232,14 @@ end
 
 function Devices:untrust(callback)
     if not self.backend then
-        logger.warn("Devices:unpair called with no backend set on device " .. Parse.maskMac(self.mac))
+        logger.warn("Devices:untrust called with no backend set on device " .. Parse.maskMac(self.mac))
         if callback then callback(false) end
         return
     end
 
+    -- Already in the asked-for state counts as done, as in trust().
     if not self.trusted then
-        if callback then callback(false) end
+        if callback then callback(true) end
         return
     end
 
