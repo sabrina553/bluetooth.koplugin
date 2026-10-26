@@ -188,6 +188,43 @@ detectWith("nothing works")
 check("timeout: none available runs the command bare", Bluez.timeoutPrefix(5), "")
 Bluez.timeout_style = "k"
 
+-- Pairing keeps one bluetoothctl session open with an agent (fix/pair-agent).
+do
+    local saved_style, saved_s = Bluez.timeout_style, Bluez.PAIR_SESSION_S
+    Bluez.timeout_style = "k"
+    local cmd = Bluez.pairCommand("00:11:22:33:44:55")
+    check("pair: capped a little past the session, agent set at start",
+        cmd and cmd:find("| timeout %-k 1 25 bluetoothctl %-%-agent NoInputNoOutput$") ~= nil, true)
+    check("pair: not a MAC is refused", Bluez.pairCommand("00:11:22:33:44:55; reboot"), nil)
+    check("pair: nil is refused", Bluez.pairCommand(nil), nil)
+
+    -- Run it for real with cat standing in for bluetoothctl and no wait, to
+    -- see exactly what bluetoothctl would read.
+    Bluez.timeout_style, Bluez.PAIR_SESSION_S = "none", 0
+    local h = io.popen((Bluez.pairCommand("00:11:22:33:44:55"):gsub("bluetoothctl %-%-agent NoInputNoOutput$", "cat")))
+    local fed = h:read("*a"); h:close()
+    check("pair: default agent, pair, quit, in order", fed,
+        "default-agent\npair 00:11:22:33:44:55\nquit\n")
+    Bluez.timeout_style, Bluez.PAIR_SESSION_S = saved_style, saved_s
+end
+
+-- The pairing session's output is logged, prompt noise stripped, MACs masked.
+do
+    local text = "\27[0;94m[bluetooth]\27[0m# Agent registered\r\n[bluetooth]# Default agent request successful\n"
+        .. "[CHG] Device 00:11:22:33:44:55 RSSI: -60\n"
+        .. "[agent] Confirm passkey 123456 (yes/no): yes\n"
+        .. "Failed to pair: org.bluez.Error.AuthenticationFailed\n"
+    local lines = Bluez.pairLogLines(text)
+    check("pair log: agent, request, confirm and failure kept, RSSI dropped", #lines, 4)
+    check("pair log: escape codes and prompt stripped", lines[1], "Agent registered")
+    local private = Bluez.pairLogLines("[Someone's iPhone]# Request confirmation\n[agent] Confirm passkey 123456 (yes/no):\n")
+    check("pair log: device name in the prompt dropped", table.concat(private, "|"):find("iPhone", 1, true), nil)
+    check("pair log: pairing code masked", private[2], "[agent] Confirm passkey NNNNNN (yes/no):")
+    check("pair log: failure kept with its error", lines[4], "Failed to pair: org.bluez.Error.AuthenticationFailed")
+    local masked = Bluez.pairLogLines("Attempting to pair with 00:11:22:33:44:55\nFailed to pair: x\n")
+    check("pair log: MACs masked", table.concat(masked, "|"):find("00:11:22:33:44:55", 1, true), nil)
+end
+
 if failures > 0 then
     print(failures .. " failure(s)")
     os.exit(1)

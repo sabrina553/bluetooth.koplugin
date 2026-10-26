@@ -8,6 +8,10 @@ local EARLY_DELAYS_S = { 0.25, 0.25, 0.5 }
 
 Poll.MAX_ATTEMPTS = 12
 
+-- Pairing a phone waits for someone to tap "Pair" on it, so its confirm
+-- runs about as long as the agent session (bluez.PAIR_SESSION_S, 20 s).
+Poll.PAIR_ATTEMPTS = 24
+
 --- Seconds to wait after check number `attempt` before the next one.
 ---@param attempt integer
 ---@return number
