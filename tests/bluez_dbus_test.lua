@@ -152,8 +152,16 @@ local function snapshot(text)
     pending.done(text)
 end
 BluezDbus.reset()
+Bluez.timeout_style = "k"
 snapshot(OBJECTS .. "@@rc 0\n")
 check("snapshot script is guarded by timeout", pending.script:find("^timeout %-k 1 5 dbus%-send") ~= nil, true)
+-- BusyBox 1.22 has no -k; the script must follow the detected style.
+local saved_style = Bluez.timeout_style
+Bluez.timeout_style = "t"
+check("snapshot script uses BusyBox 1.22 timeout", BluezDbus:snapshotScript():find("^timeout %-t 5 %-s KILL dbus%-send") ~= nil, true)
+Bluez.timeout_style = "none"
+check("snapshot script without timeout", BluezDbus:snapshotScript():find("^dbus%-send") ~= nil, true)
+Bluez.timeout_style = saved_style
 check("snapshot reads devices", type(got) == "table" and #got, 2)
 snapshot(nil)
 check("snapshot that never finished fails", got, nil)

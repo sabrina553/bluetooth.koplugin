@@ -119,9 +119,10 @@ function BluezDbus:knownDevices()
 end
 
 --- One dbus-send with its exit status after it, so a killed call reads as
---- timed out, as in Bluez.snapshotScript.
+--- timed out, as in Bluez.snapshotScript. The prefix follows the detected
+--- timeout style: BusyBox 1.22 rejects -k (crash.log 2026-10-18).
 function BluezDbus:snapshotScript()
-    return ("timeout -k 1 5 %s 2>&1\necho \"@@rc $?\"\n"):format(self:managedObjectsCommand())
+    return ("%s%s 2>&1\necho \"@@rc $?\"\n"):format(Bluez.timeoutPrefix(5), self:managedObjectsCommand())
 end
 
 --- Background read, as Bluez:readSnapshot(): done(devices), or done(nil).
