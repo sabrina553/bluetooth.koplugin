@@ -370,7 +370,13 @@ function BluetoothMenu:performToggle(dev, action, touchmenu_instance)
         -- result on this object, while a poll mid-action can install a newer
         -- one read before the action finished (it said "Disconnected" after a
         -- good connect from off, 2026-10-13 reader log).
-        if confirmed then
+        if confirmed and action == TOGGLE_ACTIONS.connect and dev.held and not dev.connected then
+            -- Longer than DONE_TOAST_S: this one has something to read.
+            UIManager:show(InfoMessage:new{
+                text = _("Disconnected from ") .. dev.name .. "\n" .. _("It stays off until you connect it."),
+                timeout = 2,
+            })
+        elseif confirmed then
             UIManager:show(InfoMessage:new{
                 text = (dev[action.field] and action.active_done_text or action.inactive_done_text) .. dev.name,
                 timeout = DONE_TOAST_S,
@@ -630,7 +636,8 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
                                    _("Paired: ") .. tostring(dev.paired) .. "\n" ..
                                    _("Connected: ") .. tostring(dev.connected) .. "\n" ..
                                    _("Trusted: ") .. tostring(dev.trusted) .. "\n" ..
-                                   _("Blocked: ") .. tostring(dev.blocked),
+                                   _("Blocked: ") .. tostring(dev.blocked) ..
+                                   (dev.held and ("\n" .. _("Stays off on wake until you connect it")) or ""),
 
                         }
                         UIManager:show(info_msg)
