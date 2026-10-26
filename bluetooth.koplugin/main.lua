@@ -153,6 +153,8 @@ function Bluetooth:onResume()
 end
 
 function Bluetooth:onSuspend()
+    -- The radio goes down next; a monitor would only watch it go.
+    self.menu:stopLiveMonitor()
     if self._wake_restore then
         -- Suspended again before the wake settled: the radio was never
         -- switched back on, so there is nothing to snapshot or disable. Hand
@@ -169,6 +171,11 @@ function Bluetooth:onSuspend()
             self.controller:disable()
         end
     end)
+end
+
+--- The plugin closes with its view (file manager <-> book) and on exit.
+function Bluetooth:onCloseWidget()
+    if self.menu then self.menu:stopLiveMonitor() end
 end
 
 return Bluetooth

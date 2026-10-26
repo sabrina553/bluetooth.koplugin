@@ -51,7 +51,11 @@ function Devices:fromScan(mac, name, backend, ctrl)
 end
 
 function Devices:parseInfo(output)
-    local info = Parse.info(output)
+    return self:applyInfo(Parse.info(output))
+end
+
+--- State in the shape of Parse.info, from either backend.
+function Devices:applyInfo(info)
     self.mac = info.mac or self.mac
     self.name = info.name or self.name
     self.paired = info.paired
@@ -65,6 +69,15 @@ end
 function Devices:refresh()
     if not self.backend or not self.backend.info then
         logger.warn("Devices:refresh called with no backend set on device " .. Parse.maskMac(self.mac))
+        return self
+    end
+
+    -- Fast mode reads typed state over D-Bus; Compatible parses bluetoothctl.
+    if self.backend.readInfo then
+        local info = self.backend:readInfo(self.mac)
+        if info then
+            self:applyInfo(info)
+        end
         return self
     end
 
