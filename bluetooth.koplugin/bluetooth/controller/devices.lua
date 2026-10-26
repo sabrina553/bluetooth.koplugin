@@ -14,6 +14,7 @@ local Poll = require("bluetooth/controller/poll")
 ---@field blocked boolean
 ---@field connected boolean
 ---@field starred boolean
+---@field held boolean Disconnected by hand: wake skips it until it is connected by hand
 ---@field controller any
 ---@field backend any The platform backend (Bluez, PocketBook, ...) used to actually talk to hardware
 local Devices = {}
@@ -40,6 +41,7 @@ function Devices:init()
     self.blocked = self.blocked or false
     self.connected = self.connected or false
     self.starred = self.starred or false
+    self.held = self.held or false
     self.backend = self.backend
 end
 

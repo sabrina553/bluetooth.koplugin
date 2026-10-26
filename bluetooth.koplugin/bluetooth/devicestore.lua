@@ -11,6 +11,7 @@ local logger = require("logger")
 ---@field blocked boolean
 ---@field connected boolean
 ---@field starred boolean
+---@field held boolean
 
 ---@class BluetoothDeviceStore
 ---@field store any
@@ -83,6 +84,7 @@ function BluetoothDeviceStore:save(dev)
         blocked = dev.blocked,
         connected = dev.connected,
         starred = dev.starred,
+        held = dev.held,
     }
 end
 
