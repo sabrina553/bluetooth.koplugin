@@ -224,6 +224,8 @@ do
 
     run("connect", "Error org.bluez.Error.AlreadyConnected: Already Connected\n@@rc 1\n")
     check("already connected: not a failure", #warnings + #fell_back, 0)
+    run("connect", "Error org.bluez.Error.InProgress: In Progress\n@@rc 1\n")
+    check("in progress (just paired): not a failure", #warnings + #fell_back, 0)
     run("unpair", "Error org.bluez.Error.DoesNotExist: Does Not Exist\n@@rc 1\n")
     check("remove twice: not a failure", #warnings + #fell_back, 0)
 

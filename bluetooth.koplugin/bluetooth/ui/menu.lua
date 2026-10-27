@@ -13,6 +13,15 @@ local MenuFind = require("bluetooth/ui/menu_find")
 local DbusMonitor = require("bluetooth/controller/dbus_monitor")
 local PluginMetadata = require("bluetooth/plugin_metadata")
 
+-- Why a pairing didn't start, or nil if it did.
+local function pairRefusedText(reason)
+    if reason == "busy" then
+        return _("Another pairing is still running. Try again in a few seconds.")
+    elseif reason == "invalid" then
+        return _("Can't pair: this device's address is not valid.")
+    end
+end
+
 local function displayName(dev)
     if dev.name and dev.name ~= "" then
         if dev.name == "Unknown" then
@@ -87,7 +96,7 @@ end
 -- the same shape: show a "Verb-ing…" toast, perform the toggle, then show
 -- a confirmation or failure toast based on the resulting state.
 -- Confirmation toasts: long enough to read "Connected", short enough not to
--- linger over the redrawn menu (Sabrina, 2026-10-13: 1 s looked ugly).
+-- linger over the redrawn menu.
 local DONE_TOAST_S = 0.25
 
 local TOGGLE_ACTIONS = {
@@ -180,6 +189,13 @@ function BluetoothMenu:buildMenuTable()
         {
             text = _("Bluetooth"),
             callback = function(touchmenu_instance)
+                -- The PocketBook radio takes about 5 s to switch and looks
+                -- hung, so people tap again; each tap used to flip it back.
+                -- Ignored quietly while that switch is under way.
+                if self.controller:isUserSwitching() then
+                    logger.dbg("Bluetooth: radio is still switching, ignoring the tap")
+                    return
+                end
                 local msg
                 -- The tick may come from the cache; toggle() re-checks, so
                 -- check first or the message and the action disagree.
@@ -248,6 +264,11 @@ end
 -- plugin switching the radio), see the 2026-10-13 session note.
 local MENU_POLL_S = 3
 
+-- A first look soon after opening, so a menu closed before the first poll
+-- isn't mistaken for a changed TouchMenu layout (WARN on the reader for a
+-- menu simply closed within 3 s, 2026-10-26 10:37:48).
+local FIRST_LOOK_S = 0.5
+
 function BluetoothMenu:getTopMenu()
     self:refresh()
     self:startPolling()
@@ -279,9 +300,9 @@ function BluetoothMenu:startPolling()
         end
         if not self:findTouchMenu() then
             -- Closed. Settings and About do not count: back returns to us.
-            -- Another page showing is normal, see MenuFind.anyOpen. No menu at
-            -- all on the first poll may mean KOReader's layout changed (or the
-            -- menu was closed within MENU_POLL_S), so log the layout.
+            -- Another page showing is normal, see MenuFind.anyOpen. Never
+            -- found, not even at the first look, may mean KOReader's layout
+            -- changed, so log the layout.
             if seen then
                 logger.dbg("Bluetooth: menu closed, polling stopped")
             elseif MenuFind.anyOpen(UIManager._window_stack) then
@@ -301,6 +322,11 @@ function BluetoothMenu:startPolling()
         UIManager:scheduleIn(MENU_POLL_S, tick)
     end
     self:updateLiveMonitor(token)
+    UIManager:scheduleIn(FIRST_LOOK_S, function()
+        if self._poll_token == token and self:findTouchMenu() then
+            seen = true
+        end
+    end)
     UIManager:scheduleIn(MENU_POLL_S, tick)
 end
 
@@ -412,8 +438,13 @@ function BluetoothMenu:performToggle(dev, action, touchmenu_instance)
     }
     UIManager:show(msg)
 
-    dev[action.method](dev, function(confirmed)
+    dev[action.method](dev, function(confirmed, reason)
         UIManager:close(msg)
+        local refused = pairRefusedText(reason)
+        if refused then
+            UIManager:show(InfoMessage:new{ text = refused, timeout = 3 })
+            return self:refresh(touchmenu_instance)
+        end
         -- The toast reads dev, not a fresh lookup: pollField confirmed the
         -- result on this object, while a poll mid-action can install a newer
         -- one read before the action finished (it said "Disconnected" after a
@@ -690,9 +721,12 @@ function BluetoothMenu:pairFoundDevice(dev, on_refresh)
     local msg = InfoMessage:new{ text = _("Pairing with ") .. displayName(dev) .. "…" }
     UIManager:show(msg)
 
-    dev:pair(function(confirmed)
+    dev:pair(function(confirmed, reason)
         UIManager:close(msg)
-        if confirmed then
+        local refused = pairRefusedText(reason)
+        if refused then
+            UIManager:show(InfoMessage:new{ text = refused, timeout = 3 })
+        elseif confirmed then
             UIManager:show(InfoMessage:new{
                 text = _("Paired with ") .. displayName(dev),
                 timeout = 2,

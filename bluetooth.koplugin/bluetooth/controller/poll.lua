@@ -1,7 +1,7 @@
 -- How often to re-check the radio or a device after an action. Most toggles
 -- have landed by the first check, so the early ones are quick; then it slows
 -- to once a second. The total stays about 9 s, as with the old ten 1 s checks
--- (Sabrina, 2026-10-19: confirmations felt a touch slow).
+-- (decision 2026-10-19: confirmations felt a touch slow).
 local Poll = {}
 
 local EARLY_DELAYS_S = { 0.25, 0.25, 0.5 }

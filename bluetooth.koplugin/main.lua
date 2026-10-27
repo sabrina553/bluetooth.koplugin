@@ -27,7 +27,6 @@ local BluetoothSelfUpdater = require("bluetooth/ota/self_updater")
 -- bounces the app (resume, suspend ~1s later) on some wakes, and each
 -- netagent toggle makes the firmware draw its own Bluetooth dialogs over the
 -- cover screen. Waiting lets a bounce pass with no radio change at all.
--- Chosen with Sabrina, 2026-10-13: the radio does not need to be instant.
 local WAKE_SETTLE_S = 2
 
 ---@class Bluetooth
@@ -67,12 +66,6 @@ function Bluetooth:init()
 
     self.ui.menu:registerToMainMenu(self.menu)
 
-    -- init also runs on every view change (file manager <-> book), where
-    -- nothing woke up: restoring then switched Bluetooth back on after the
-    -- user had turned it off. Wake-ups are handled by onResume.
-    -- A cold start restores the last state the user chose or had at suspend,
-    -- like a wake does (decision 2026-10-26), after the same settle delay so
-    -- netagent and bluetoothd are up.
     if Session.isColdStart() then
         local was_on = self.settings:getRadioWasOn()
         logger.dbg("Bluetooth.koplugin: Cold start, restoring Bluetooth (was on: " .. tostring(was_on) .. ") in " .. WAKE_SETTLE_S .. "s")
@@ -84,17 +77,22 @@ function Bluetooth:init()
     logger.dbg("Bluetooth.koplugin: Initialized")
 end
 
---- Reconnects devices after a start or wake-up. The radio is only switched
---- on again (`allow_enable`) to restore the last state the user left it in
---- (menu or suspend); it is never turned on just because the reader started
---- or woke. Decisions: 2026-10-13 (auto-connect, never auto-enable) and
---- 2026-10-26 (a cold start restores the last state) session notes.
 ---@param allow_enable boolean
 function Bluetooth:restoreBluetoothState(allow_enable)
+
+    local function notEnabled(reason)
+        -- Only a disable (suspend) is expected here; a newer enable, from a
+        -- tap during the wake, skips the reconnect and should say so.
+        if reason == "superseded" and not self.controller:wantsEnabled() then
+            logger.dbg("Bluetooth.koplugin: enable replaced by a disable (suspend), skipping reconnect")
+        elseif reason == "superseded" then
+            logger.warn("Bluetooth.koplugin: enable replaced by a newer enable, skipping reconnect")
+        else
+            logger.warn("Bluetooth.koplugin: could not confirm bluetooth enabled, skipping reconnect")
+        end
+    end
     local function reconnect()
         self.controller:knownDevices(function(fresh)
-            -- Not fresh: the radio was switched again during the read, so the
-            -- list describes a radio that is gone.
             if fresh then
                 self.controller:reconnectOnWake()
             else
@@ -108,11 +106,11 @@ function Bluetooth:restoreBluetoothState(allow_enable)
     -- disable is in flight; reconnecting then would talk to a dying daemon.
     -- enable() supersedes the disable and waits for the radio to go down.
     if self.controller:isDisabling() and allow_enable then
-        self.controller:enable(function(enabled_confirmed)
+        self.controller:enable(function(enabled_confirmed, reason)
             if enabled_confirmed then
                 reconnect()
             else
-                logger.warn("Bluetooth.koplugin: could not confirm bluetooth enabled, skipping reconnect")
+                notEnabled(reason)
             end
         end)
         return
@@ -126,9 +124,9 @@ function Bluetooth:restoreBluetoothState(allow_enable)
         return
     end
 
-    self.controller:enableWhenDisabled(function(enabled_confirmed)
+    self.controller:enableWhenDisabled(function(enabled_confirmed, reason)
         if not enabled_confirmed then
-            logger.warn("Bluetooth.koplugin: could not confirm bluetooth enabled, skipping reconnect")
+            notEnabled(reason)
             return
         end
         reconnect()

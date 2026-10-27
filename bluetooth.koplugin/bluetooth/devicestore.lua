@@ -88,11 +88,6 @@ function BluetoothDeviceStore:save(dev)
     }
 end
 
---- Replaces the store with the paired devices in the list and flushes once.
---- Unpaired scan results are not kept: they are never shown from the cache,
---- and storing them grew the file with every scan (219 entries against 3
---- paired, seen on the reader 2026-10-13). Rebuilding also drops devices that
---- have since been unpaired.
 ---@param devices Devices[]
 function BluetoothDeviceStore:saveAll(devices)
     self.data = {}

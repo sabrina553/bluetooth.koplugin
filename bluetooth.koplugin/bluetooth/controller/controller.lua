@@ -276,11 +276,12 @@ end
 local ENABLE_DISABLE_DEBOUNCE_S = 0.15
 
 ---@param expected boolean 
----@param callback fun(confirmed: boolean)|nil 
+---@param callback fun(confirmed: boolean, reason: string|nil)|nil 
 ---@param attempt integer|nil internal, do not pass
 --- The callback always fires exactly once: true if confirmed, false if it
 --- timed out or a newer enable/disable superseded this call (the newer call
---- decides the final state). Dropping it silently left connect/scan waiting
+--- decides the final state). A superseded call also passes "superseded", so
+--- callers can tell a suspend replacing an enable from a radio that failed. Dropping it silently left connect/scan waiting
 --- forever after a suspend/resume.
 ---@param generation integer the poll generation this call belongs to, captured
 ---  by enable()/disable() at the moment they started polling. If a newer
@@ -290,7 +291,7 @@ local ENABLE_DISABLE_DEBOUNCE_S = 0.15
 local function pollField(self, field, expected, callback, attempt, generation)
     if generation ~= self._poll_generation then
         logger.dbg("Bluetooth: pollField for " .. field .. " superseded by a newer enable/disable call, stopping")
-        if callback then callback(false) end
+        if callback then callback(false, "superseded") end
         return
     end
 
@@ -305,7 +306,7 @@ local function pollField(self, field, expected, callback, attempt, generation)
     -- here too in case a newer enable/disable call landed while it ran.
     if generation ~= self._poll_generation then
         logger.dbg("Bluetooth: pollField for " .. field .. " superseded by a newer enable/disable call, stopping")
-        if callback then callback(false) end
+        if callback then callback(false, "superseded") end
         return
     end
 
@@ -401,7 +402,7 @@ end
 -- budget as pollField and sends anyway, since a stuck radio is worse.
 local function waitForOff(self, generation, send, callback, attempt)
     if generation ~= self._poll_generation then
-        if callback then callback(false) end
+        if callback then callback(false, "superseded") end
         return
     end
     attempt = attempt or 1
@@ -431,12 +432,12 @@ function controller:enable(callback)
     self._enabling_generation = my_generation
     local release = Standby.hold()
     local user_callback = callback
-    callback = function(confirmed)
+    callback = function(confirmed, reason)
         release()
         if self._enabling_generation == my_generation then
             self._enabling_generation = nil
         end
-        if user_callback then user_callback(confirmed) end
+        if user_callback then user_callback(confirmed, reason) end
     end
 
     local function send()
@@ -447,7 +448,7 @@ function controller:enable(callback)
     UIManager:scheduleIn(ENABLE_DISABLE_DEBOUNCE_S, function()
         if my_generation ~= self._poll_generation then
             logger.dbg("Bluetooth: enable() superseded before its command was sent, skipping")
-            if callback then callback(false) end
+            if callback then callback(false, "superseded") end
             return
         end
         if self._disable_sent then
@@ -486,16 +487,31 @@ function controller:disable(callback)
     end)
 end
 
+-- Module level, not per instance: main.lua builds a new controller on every
+-- view change while the old one's poll finishes the switch.
+local user_switching = false
+
+--- True while a switch the user started with toggle() is under way. Restores,
+--- connects and suspends switch the radio too, but must not block the menu.
+function controller:isUserSwitching()
+    return user_switching
+end
+
 --- The user's own switch: its intent is saved as the state to restore at a
 --- cold start. disable() alone is not, since disable-on-suspend uses it.
 function controller:toggle(callback)
     self:status()
     local turn_on = not self:wantsEnabled()
     if self.settings then self.settings:setRadioWasOn(turn_on) end
+    user_switching = true
+    local function done(...)
+        user_switching = false
+        if callback then callback(...) end
+    end
     if turn_on then
-        return self:enable(callback)
+        return self:enable(done)
     else
-        return self:disable(callback)
+        return self:disable(done)
     end
 end
 

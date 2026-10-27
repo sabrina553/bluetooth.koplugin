@@ -147,9 +147,12 @@ function BluezDbus:readSnapshot(done)
     end)
 end
 
--- Errors that mean the action was already done, so they are not failures.
+-- Errors that mean the action was already done or is under way, so they are
+-- not failures; the caller's poll confirms. InProgress: right after pairing,
+-- BlueZ is already connecting (reader log 2026-10-26 10:48:52).
 local ALREADY_DONE = {
     ["org.bluez.Error.AlreadyConnected"] = true,
+    ["org.bluez.Error.InProgress"] = true,
     ["org.bluez.Error.NotConnected"] = true,
     ["org.bluez.Error.DoesNotExist"] = true,
 }

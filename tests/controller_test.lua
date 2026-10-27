@@ -39,6 +39,9 @@ local controller = require("bluetooth/controller/controller")
 
 local failures = 0
 local function check(cond, message)
+    -- A string here means a check(description, actual, expected) call from
+    -- the other test style, which would always pass (it did, 2026-10-26).
+    assert(type(cond) ~= "string", "check(cond, message) called with a description first: " .. tostring(cond))
     if not cond then
         failures = failures + 1
         print("FAIL " .. message)
@@ -483,6 +486,88 @@ do
     c.connected_at_suspend = { "AA:AA" }
     c:reconnectOnWake()
     check(connects == 1, "wake: released device reconnects, got " .. connects)
+end
+
+-- A suspend that replaces an enable says so, so main.lua logs it at debug
+-- level instead of WARN (reader log 2026-10-26 10:07:51).
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    local c = build(false)
+    fake.status = function() return false end
+    local ok, reason
+    c:enable(function(confirmed, why) ok, reason = confirmed, why end)
+    c:disable()
+    drain()
+    check(ok == false and reason == "superseded", "superseded enable: reports why, got " .. tostring(reason))
+end
+
+-- main.lua tells the two apart by wantsEnabled() when the callback fires.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    local c = build(false)
+    local by_disable, by_enable
+    c:enable(function() by_disable = c:wantsEnabled() end)
+    c:disable()
+    drain()
+    c:enable(function() by_enable = c:wantsEnabled() end)
+    c:enable()
+    drain()
+    check(by_disable == false, "superseded by a disable: no longer wants on")
+    check(by_enable == true, "superseded by an enable: still wants on")
+end
+
+-- Only the user's own switch blocks the menu, and it still does on the
+-- controller built after a view change.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    local c = build(false)
+    c:enable()
+    check(not c:isUserSwitching(), "user switch: a restore's enable doesn't count")
+    drain()
+    c:toggle()
+    local after_view_change = build(true)
+    check(after_view_change:isUserSwitching(), "user switch: seen by a new instance")
+    drain()
+    check(not c:isUserSwitching(), "user switch: cleared once confirmed")
+end
+
+-- Pairing while another session runs: the menu is told "busy", not a
+-- failed pairing.
+do
+    local Devices = require("bluetooth/controller/devices")
+    local dev = Devices:new({ mac = "AA:AA", name = "Phone",
+        backend = { pair = function() return false, "busy" end },
+        controller = { enableWhenDisabled = function(_, cb) cb(true) end } })
+    local ok, reason
+    dev:pair(function(confirmed, why) ok, reason = confirmed, why end)
+    check(ok == false and reason == "busy", "pair busy: reported as busy, got " .. tostring(reason))
+end
+
+-- A pairing session that reports failure ends the wait at once, rather than
+-- after the whole confirm budget (about 22 s).
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    local Devices = require("bluetooth/controller/devices")
+    local finish
+    local dev = Devices:new({ mac = "AA:AA", name = "Phone",
+        backend = {
+            pair = function(_, _, on_done) finish = on_done; return true end,
+            info = function() return "Device AA:AA (public)\n\tPaired: no\n" end,
+        },
+        controller = { enableWhenDisabled = function(_, cb) cb(true) end } })
+    local results = {}
+    dev:pair(function(confirmed) table.insert(results, confirmed) end)
+    check(#results == 0, "pair failure: still waiting before the session ends")
+    finish(false)
+    check(#results == 1 and results[1] == false, "pair failure: reported at once")
+    local warned = 0
+    local logger = require("logger")
+    local saved_warn = logger.warn
+    logger.warn = function() warned = warned + 1 end
+    drain()
+    logger.warn = saved_warn
+    check(#results == 1, "pair failure: the poll ending later does not report twice")
+    check(warned == 0, "pair failure: the leftover poll stops without a WARN, got " .. warned)
 end
 
 if failures > 0 then os.exit(1) end
