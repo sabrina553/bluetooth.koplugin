@@ -322,9 +322,18 @@ function BluetoothMenu:startPolling()
         UIManager:scheduleIn(MENU_POLL_S, tick)
     end
     self:updateLiveMonitor(token)
-    UIManager:scheduleIn(FIRST_LOOK_S, function()
+    local function firstLook()
         if self._poll_token == token and self:findTouchMenu() then
             seen = true
+        end
+        return seen
+    end
+    -- Our table is shown during the tap that built it, so the next tick
+    -- usually finds the menu; the delayed look covers a slower open
+    -- (decision 2026-10-27).
+    UIManager:nextTick(function()
+        if not firstLook() then
+            UIManager:scheduleIn(FIRST_LOOK_S, firstLook)
         end
     end)
     UIManager:scheduleIn(MENU_POLL_S, tick)

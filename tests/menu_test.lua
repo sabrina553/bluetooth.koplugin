@@ -198,16 +198,19 @@ end
 do
     local UIManager = require("ui/uimanager")
     local logger = require("logger")
-    local saved_schedule, saved_warn = UIManager.scheduleIn, logger.warn
+    local saved_schedule, saved_tick, saved_warn = UIManager.scheduleIn, UIManager.nextTick, logger.warn
     local tasks, warned = {}, 0
     UIManager.scheduleIn = function(_, s, fn) table.insert(tasks, { s = s, fn = fn }) end
+    -- Queued as delay 0, so it sorts before any scheduled task.
+    UIManager.nextTick = function(_, fn) table.insert(tasks, { s = 0, fn = fn, tick = true }) end
+    local function sorted() table.sort(tasks, function(a, b) return a.s < b.s end) end
     UIManager._window_stack = {}
     logger.warn = function() warned = warned + 1 end
     local open = true
     menu.findTouchMenu = function() return open end
     menu.checkNow = function() end
     menu:startPolling()
-    table.sort(tasks, function(a, b) return a.s < b.s end)
+    sorted()
     tasks[1].fn() -- first look, menu open
     open = false  -- closed before the first poll
     tasks[2].fn() -- first poll
@@ -215,10 +218,23 @@ do
     -- Never found at all: that one still warns.
     tasks, warned, open = {}, 0, false
     menu:startPolling()
-    table.sort(tasks, function(a, b) return a.s < b.s end)
-    tasks[1].fn(); tasks[2].fn()
+    while #tasks > 0 do sorted(); table.remove(tasks, 1).fn() end
     check("never found: WARN kept", warned, 1)
-    UIManager.scheduleIn, logger.warn = saved_schedule, saved_warn
+    -- The first look runs on the next tick; missed there, the delayed retry
+    -- still finds a slow-opening menu (decision 2026-10-27).
+    tasks, warned, open = {}, 0, false
+    menu:startPolling()
+    sorted()
+    check("first look: on the next tick", tasks[1].tick, true)
+    if tasks[1].tick then
+        tasks[1].fn() -- not there yet
+        sorted()
+        check("first look: retried later", #tasks, 3)
+        open = true; tasks[2].fn() -- the retry finds it
+        open = false; tasks[3].fn() -- closed before the first poll
+        check("first look: retry counts as seen", warned, 0)
+    end
+    UIManager.scheduleIn, UIManager.nextTick, logger.warn = saved_schedule, saved_tick, saved_warn
     menu.findTouchMenu, menu.checkNow = nil, nil
 end
 
