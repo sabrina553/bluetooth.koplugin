@@ -288,17 +288,22 @@ end
 ---@param on_done fun(result: boolean|nil)|nil
 ---@return boolean, string|nil
 function bluez:pair(mac, on_done)
-    local out = os.tmpname()
-    local cmd = bluez.pairCommand(mac, out)
-    if not cmd then
-        os.remove(out)
+    -- Refusals first, before the temp file: a refused pair costs nothing.
+    -- A placeholder path checks the MAC the same way the real one will.
+    if not bluez.pairCommand(mac, "/tmp/x") then
         logger.warn("Bluez: not pairing, not a MAC: " .. Parse.maskMac(tostring(mac)))
         return false, "invalid"
     end
     if bluez.pair_session then
         logger.info("Bluez: a pairing session is still running, not starting another for " .. Parse.maskMac(mac))
-        os.remove(out)
         return false, "busy"
+    end
+    local out = os.tmpname()
+    local cmd = bluez.pairCommand(mac, out)
+    if not cmd then
+        os.remove(out)
+        logger.warn("Bluez: not pairing, unexpected temp path: " .. tostring(out))
+        return false, "invalid"
     end
     local session = {}
     bluez.pair_session = session
