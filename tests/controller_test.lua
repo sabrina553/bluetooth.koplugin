@@ -1,5 +1,6 @@
 -- Run from the repo root: luajit tests/controller_test.lua
-package.path = "bluetooth.koplugin/?.lua;" .. package.path
+package.path = "bluetooth.koplugin/?.lua;tests/?.lua;" .. package.path
+local rejectDescription = require("helpers").rejectDescription
 package.preload["gettext"] = function() return function(s) return s end end
 package.preload["logger"] = function()
     local noop = function() end
@@ -39,9 +40,7 @@ local controller = require("bluetooth/controller/controller")
 
 local failures = 0
 local function check(cond, message)
-    -- A string here means a check(description, actual, expected) call from
-    -- the other test style, which would always pass (it did, 2026-10-26).
-    assert(type(cond) ~= "string", "check(cond, message) called with a description first: " .. tostring(cond))
+    rejectDescription(cond)
     if not cond then
         failures = failures + 1
         print("FAIL " .. message)
@@ -568,6 +567,71 @@ do
     logger.warn = saved_warn
     check(#results == 1, "pair failure: the poll ending later does not report twice")
     check(warned == 0, "pair failure: the leftover poll stops without a WARN, got " .. warned)
+end
+
+-- The other "superseded" exits, past the debounce: each calls back once with
+-- the reason and gives its standby hold back.
+local function recorder()
+    local got = {}
+    return got, function(ok, reason) table.insert(got, tostring(ok) .. ":" .. tostring(reason)) end
+end
+
+-- pollField, on a retry: a newer call landed between two polls.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local c = build(false)
+    local got, cb = recorder()
+    c:enable(cb)
+    table.remove(queue, 1)() -- debounce: enable sent, radio still off, retry queued
+    c:disable()
+    drain()
+    check(table.concat(got, ",") == "false:superseded", "poll retry superseded: got " .. table.concat(got, ","))
+    check(holds == 0, "poll retry superseded: holds balanced, got " .. holds)
+end
+
+-- pollField, after status(): a newer call landed while the status read ran.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local c = build(false)
+    local sent = false
+    fake.enable = function() sent = true end
+    fake.status = function()
+        if sent then sent = false; c:disable() end
+        return false
+    end
+    local got, cb = recorder()
+    c:enable(cb)
+    table.remove(queue, 1)() -- debounce: enable sent, disable arrives mid-status
+    check(table.concat(got, ",") == "false:superseded", "status superseded: called back at once, got " .. table.concat(got, ","))
+    drain()
+    check(table.concat(got, ",") == "false:superseded", "status superseded: only once, got " .. table.concat(got, ","))
+    check(holds == 0, "status superseded: holds balanced, got " .. holds)
+end
+
+-- waitForOff: an enable waiting for the radio to go off is replaced by a
+-- newer disable, so its "on" is never sent.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local on, order = true, {}
+    local c = build(true)
+    fake.status = function() return on end
+    fake.disable = function() table.insert(order, "off") end
+    fake.enable = function() table.insert(order, "on"); on = true end
+    c:disable()
+    table.remove(queue, 1)() -- disable debounce: off sent, radio still reads on
+    local got, cb = recorder()
+    c:enable(cb)
+    table.remove(queue, 1)() -- stale disable poll ends
+    table.remove(queue, 1)() -- enable debounce: waiting for off, retry queued
+    c:disable()
+    on = false
+    drain()
+    check(table.concat(got, ",") == "false:superseded", "wait superseded: got " .. table.concat(got, ","))
+    check(table.concat(order, ",") == "off,off", "wait superseded: on never sent, got " .. table.concat(order, ","))
+    check(holds == 0, "wait superseded: holds balanced, got " .. holds)
 end
 
 if failures > 0 then os.exit(1) end
