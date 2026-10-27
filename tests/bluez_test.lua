@@ -197,8 +197,8 @@ do
     Bluez.timeout_style = "k"
     local cmd = Bluez.pairCommand("00:11:22:33:44:55", "/tmp/lua_test")
     check("pair: capped a little past the session, agent set at start",
-        cmd and cmd:find("| timeout %-k 1 25 bluetoothctl %-%-agent NoInputNoOutput; echo @@done %) >/tmp/lua_test 2>&1$") ~= nil, true)
-    check("pair: one grep -e per result, no -E", cmd and cmd:find("grep -q -e 'Pairing successful' -e 'Failed to pair' -e 'not available' ", 1, true) ~= nil, true)
+        cmd and cmd:find("| timeout %-k 1 25 bluetoothctl %-%-agent NoInputNoOutput; echo; echo @@done %) >/tmp/lua_test 2>&1$") ~= nil, true)
+    check("pair: one grep -e per result, no -E", cmd and cmd:find("grep -q -e '^[^ ]*Pairing successful' -e '^[^ ]*\\[[^]]*\\][^ ]*# [^ ]*Pairing successful' -e '^[^ ]*Failed to pair' ", 1, true) ~= nil, true)
     check("pair: not a MAC is refused", Bluez.pairCommand("00:11:22:33:44:55; reboot", "/tmp/x"), nil)
     check("pair: nil is refused", Bluez.pairCommand(nil, "/tmp/x"), nil)
     check("pair: an odd output path is refused", Bluez.pairCommand("00:11:22:33:44:55", "/tmp/x; reboot"), nil)
@@ -208,6 +208,21 @@ do
     check("pair result: device gone", Bluez.pairResult("Device 00:11:22:33:44:55 not available\n"), false)
     check("pair result: no controller", Bluez.pairResult("No default controller available\n"), false)
     check("pair result: cut off", Bluez.pairResult("Attempting to pair\n"), nil)
+    -- Only bluetoothctl's own lines count, with or without its prompt (BlueZ
+    -- 5.52 client/main.c), never a nearby device's name.
+    check("pair result: a device named like a failure", Bluez.pairResult("[NEW] Device 00:11:22:33:44:55 Failed to pair\n"), nil)
+    check("pair result: a renamed device", Bluez.pairResult("[CHG] Device 00:11:22:33:44:55 Name: Pairing successful\n"), nil)
+    check("pair result: a device named not available", Bluez.pairResult("[NEW] Device 00:11:22:33:44:55 not available\n"), nil)
+    check("pair result: coloured device line",
+        Bluez.pairResult("[\1\27[0;92m\2NEW\1\27[0m\2] Device 00:11:22:33:44:55 Failed to pair\n"), nil)
+    check("pair result: a name hiding a prompt",
+        Bluez.pairResult("[NEW] Device 00:11:22:33:44:55 x]# Pairing successful\n"), nil)
+    check("pair result: success after the prompt", Bluez.pairResult("[bluetooth]# Pairing successful\r\n"), true)
+    check("pair result: failure after a coloured prompt",
+        Bluez.pairResult("\1\27[0;94m\2[bluetooth]\1\27[0m\2# Failed to pair: org.bluez.Error.AuthenticationFailed\n"), false)
+    check("pair result: gone after a device prompt",
+        Bluez.pairResult("[Someone's iPhone]# Device 00:11:22:33:44:55 not available\n"), false)
+    check("pair result: after a repainted prompt", Bluez.pairResult("[bluetooth]# \r\27[KPairing successful\n"), true)
 
     -- Run the real script with awk standing in for bluetoothctl: it echoes
     -- what it is fed, answers the pair with success, and stops at quit. The
@@ -222,7 +237,7 @@ do
     local f = io.open(out, "r"); local text = f and f:read("*a") or ""; if f then f:close() end
     os.remove(out)
     check("pair: fed default agent, pair, quit in order",
-        text:find("default%-agent\npair 00:11:22:33:44:55\nPairing successful\nquit\n@@done") ~= nil, true)
+        text:find("default%-agent\npair 00:11:22:33:44:55\nPairing successful\nquit\n\n@@done\n$") ~= nil, true)
     check("pair: session ends once it has a result, took " .. took .. "s", took <= 4, true)
 
     -- A failure ends the session early too, and silence ends it once the
@@ -248,8 +263,19 @@ do
     check("pair: a failure is reported", Bluez.pairResult(failed), false)
     check("pair: a failure ends the session early, took " .. failed_took .. "s", failed_took <= 4, true)
     local silent, silent_took = session(nil, 2)
-    check("pair: silence still sends quit", silent:find("\nquit\n@@done", 1, true) ~= nil, true)
+    check("pair: silence still sends quit", silent:find("\nquit\n\n@@done\n", 1, true) ~= nil, true)
     check("pair: silence ends after the session, took " .. silent_took .. "s", silent_took >= 2 and silent_took <= 5, true)
+    -- A device named like a result neither ends nor decides the session.
+    local named, named_took = session("[NEW] Device 00:11:22:33:44:55 Failed to pair", 2)
+    check("pair: a device name is not a result", Bluez.pairResult(named), nil)
+    check("pair: a device name doesn't end the session, took " .. named_took .. "s", named_took >= 2, true)
+    -- The real lines still do, behind the prompt too.
+    local prompted, prompted_took = session("\\033[0;94m[bluetooth]\\033[0m# Pairing successful", 20)
+    check("pair: success behind the prompt is reported", Bluez.pairResult(prompted), true)
+    check("pair: success behind the prompt ends early, took " .. prompted_took .. "s", prompted_took <= 4, true)
+    local gone, gone_took = session("[bluetooth]# Device 00:11:22:33:44:55 not available", 20)
+    check("pair: a gone device is reported", Bluez.pairResult(gone), false)
+    check("pair: a gone device ends the session early, took " .. gone_took .. "s", gone_took <= 4, true)
     Bluez.timeout_style, Bluez.PAIR_SESSION_S = saved_style, saved_s
 end
 
@@ -294,6 +320,25 @@ do
     check("pair: still busy before its ticks run out", Bluez:pair("00:11:22:33:44:66"), false)
     finish()
     check("pair: free once its check() ends", Bluez.pair_session, nil)
+
+    -- Only the shell's own "@@done" line ends it, not a device of that name.
+    local out_path
+    os.execute = function(cmd) out_path = cmd:match(">(%S+) 2>&1") return 0 end
+    check("pair: a session to watch starts", Bluez:pair("00:11:22:33:44:55"), true)
+    local fh = io.open(out_path, "w")
+    fh:write("[NEW] Device 00:11:22:33:44:55 @@done\n[CHG] Device 00:11:22:33:44:55 Name: @@done\n")
+    fh:close()
+    tick()
+    check("pair: a device named @@done doesn't end it", Bluez.pair_session ~= nil, true)
+    fh = io.open(out_path, "a")
+    fh:write("[bluetooth]# quit\n@@done\n")
+    fh:close()
+    tick()
+    check("pair: its own @@done line ends it", Bluez.pair_session, nil)
+    local left = io.open(out_path, "r")
+    check("pair: its output file is removed", left, nil)
+    if left then left:close(); os.remove(out_path) end
+    finish()
 
     -- A finishing session leaves a newer session's flag alone.
     check("pair: next session starts", Bluez:pair("00:11:22:33:44:66"), true)
