@@ -190,6 +190,9 @@ bluez.pair_session = nil
 local PAIR_RESULTS = {
     { "Pairing successful", true },
     { "Failed to pair", false },
+    -- BlueZ drops scan results 3 min after a scan; the list isn't refreshed.
+    { "not available", false },
+    { "No default controller available", false },
 }
 
 --- The shell command for one pairing session, or nil if `mac` isn't a MAC

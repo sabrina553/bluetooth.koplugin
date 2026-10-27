@@ -196,13 +196,15 @@ do
     local cmd = Bluez.pairCommand("00:11:22:33:44:55", "/tmp/lua_test")
     check("pair: capped a little past the session, agent set at start",
         cmd and cmd:find("| timeout %-k 1 25 bluetoothctl %-%-agent NoInputNoOutput; echo @@done %) >/tmp/lua_test 2>&1$") ~= nil, true)
-    check("pair: one grep -e per result, no -E", cmd and cmd:find("grep -q -e 'Pairing successful' -e 'Failed to pair' ", 1, true) ~= nil, true)
+    check("pair: one grep -e per result, no -E", cmd and cmd:find("grep -q -e 'Pairing successful' -e 'Failed to pair' -e 'not available' ", 1, true) ~= nil, true)
     check("pair: not a MAC is refused", Bluez.pairCommand("00:11:22:33:44:55; reboot", "/tmp/x"), nil)
     check("pair: nil is refused", Bluez.pairCommand(nil, "/tmp/x"), nil)
     check("pair: an odd output path is refused", Bluez.pairCommand("00:11:22:33:44:55", "/tmp/x; reboot"), nil)
 
     check("pair result: success", Bluez.pairResult("...\nPairing successful\n"), true)
     check("pair result: failure", Bluez.pairResult("Failed to pair: org.bluez.Error.ConnectionAttemptFailed\n"), false)
+    check("pair result: device gone", Bluez.pairResult("Device 00:11:22:33:44:55 not available\n"), false)
+    check("pair result: no controller", Bluez.pairResult("No default controller available\n"), false)
     check("pair result: cut off", Bluez.pairResult("Attempting to pair\n"), nil)
 
     -- Run the real script with awk standing in for bluetoothctl: it echoes
