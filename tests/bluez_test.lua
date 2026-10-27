@@ -8,6 +8,8 @@ end
 package.preload["ui/uimanager"] = function() return {} end
 
 local Bluez = require("bluetooth/controller/bluez")
+-- Kept before a later test swaps in a synchronous stand-in.
+local realRunAsync = Bluez.runAsync
 
 local failures = 0
 local function check(description, actual, expected)
@@ -301,6 +303,60 @@ do
     check("pair: an old session doesn't clear a newer one", Bluez.pair_session == newer, true)
 
     os.execute, UIManager.scheduleIn, Bluez.pair_session = real_execute, saved_schedule, nil
+end
+
+-- runAsync counts ticks, not os.time: a suspend jumps the clock by hours
+-- between two ticks while the timer and the command stood still.
+do
+    local real_execute, real_time, real_tmpname = os.execute, os.time, os.tmpname
+    local UIManager = require("ui/uimanager")
+    local saved_schedule = UIManager.scheduleIn
+    local queue, waited = {}, 0
+    UIManager.scheduleIn = function(_, delay, fn) table.insert(queue, { delay = delay, fn = fn }) end
+    local function tick()
+        local job = table.remove(queue, 1)
+        if job then waited = waited + job.delay; job.fn() end
+    end
+    local clock = real_time()
+    os.time = function() clock = clock + 3600; return clock end
+    os.execute = function() return 0 end -- the command never runs
+    local base, bases = nil, {}
+    os.tmpname = function() base = real_tmpname(); table.insert(bases, base); return base end
+    local function exists(path)
+        local f = io.open(path, "r")
+        if f then f:close() end
+        return f ~= nil
+    end
+
+    -- Never finishes: gives up after the old 25 s of waiting, not on the
+    -- first tick after the jump.
+    local result, calls = "pending", 0
+    realRunAsync("true\n", function(text) result, calls = text, calls + 1 end)
+    local ticks = 0
+    while #queue > 0 and ticks < 1000 do tick(); ticks = ticks + 1 end
+    check("runAsync: clock jumps alone don't time it out", ticks > 100, true)
+    check("runAsync: times out in the end", result, nil)
+    check("runAsync: done called once", calls, 1)
+    check("runAsync: waited at least 25 s", waited >= 25, true)
+    check("runAsync: waited less than 25.4 s", waited < 25.4, true)
+    check("runAsync: timed-out script removed", exists(base .. ".sh"), false)
+    check("runAsync: timed-out temp name removed", exists(base), false)
+
+    -- Output arriving after a jump is still read.
+    result, waited, queue = "pending", 0, {}
+    realRunAsync("true\n", function(text) result = text end)
+    for _ = 1, 10 do tick() end
+    check("runAsync: still waiting after jumps", result, "pending")
+    local f = io.open(base .. ".out", "w"); f:write("hello"); f:close()
+    tick()
+    check("runAsync: late output read", result, "hello")
+    check("runAsync: output file removed", exists(base .. ".out"), false)
+    check("runAsync: script removed", exists(base .. ".sh"), false)
+    check("runAsync: temp name removed", exists(base), false)
+
+    -- Nothing left in /tmp even when a check above failed.
+    for _, b in ipairs(bases) do os.remove(b); os.remove(b .. ".sh"); os.remove(b .. ".out") end
+    os.execute, os.time, os.tmpname, UIManager.scheduleIn = real_execute, real_time, real_tmpname, saved_schedule
 end
 
 if failures > 0 then

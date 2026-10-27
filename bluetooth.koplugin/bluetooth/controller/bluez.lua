@@ -461,7 +461,9 @@ function bluez.runAsync(script, done)
     os.execute(("( %ssh %s > %s.part 2>&1; mv %s.part %s; [ -e %s ] || rm -f %s ) >/dev/null 2>&1 &")
         :format(bluez.timeoutPrefix(SNAPSHOT_TIMEOUT_S), script_path, out_path, out_path, out_path, script_path, out_path))
 
-    local deadline = os.time() + SNAPSHOT_TIMEOUT_S + 5
+    -- Ticks, not os.time, as in pair(): a suspend jumps the clock but pauses
+    -- this timer and the command alike. Two extra for the short back-off ticks.
+    local ticks_left = math.ceil((SNAPSHOT_TIMEOUT_S + 5) / SNAPSHOT_POLL_S) + 2
     local function cleanup()
         os.remove(base); os.remove(script_path); os.remove(out_path)
     end
@@ -474,7 +476,8 @@ function bluez.runAsync(script, done)
             cleanup()
             return done(text)
         end
-        if os.time() > deadline then
+        ticks_left = ticks_left - 1
+        if ticks_left <= 0 then
             cleanup()
             return done(nil)
         end
