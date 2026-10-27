@@ -180,7 +180,7 @@ end
 -- already registered") and the default KeyboardDisplay agent then waits for
 -- a typed "yes" to the phone's code (reader log 2026-10-26 10:17). With
 -- NoInputNoOutput, pairing is Just Works. Showing the code on the reader to
--- confirm is backlog, after the stable release (Sabrina, 2026-10-26).
+-- confirm is backlog, after the stable release (decision 2026-10-26).
 bluez.PAIR_SESSION_S = 20
 
 -- The running pairing session; only its own check() clears it.
