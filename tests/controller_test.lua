@@ -644,5 +644,44 @@ do
     check(warned == 0, "pair failure: the leftover poll stops without a WARN, got " .. warned)
 end
 
+-- Phones often pair without staying connected as an input: once Paired
+-- reads yes the device is trusted and the pairing reported, connect or not
+-- (code review finding 12, decision 2026-10-27).
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    local Devices = require("bluetooth/controller/devices")
+    local function pairBackend(state, order)
+        return {
+            pair = function() return true end,
+            connect = function() table.insert(order, "connect") end,
+            trust = function() table.insert(order, "trust"); state.trusted = true end,
+            info = function(_, mac)
+                local yn = function(v) return v and "yes" or "no" end
+                return "Device " .. mac .. " (public)\n\tPaired: " .. yn(state.paired) .. "\n\tTrusted: "
+                    .. yn(state.trusted) .. "\n\tConnected: no\n"
+            end,
+        }
+    end
+    local controller_stub = { enableWhenDisabled = function(_, cb) cb(true) end }
+
+    local order, results = {}, {}
+    local dev = Devices:new({ mac = "AA:AA", name = "Phone",
+        backend = pairBackend({ paired = true }, order), controller = controller_stub })
+    dev:pair(function(confirmed, why) table.insert(results, { confirmed, why }) end)
+    drain()
+    check(table.concat(order, ",") == "connect,trust", "pair unconnected: trusted anyway, got " .. table.concat(order, ","))
+    check(dev.trusted == true, "pair unconnected: device reads trusted")
+    check(#results == 1 and results[1][1] == true and results[1][2] == nil,
+        "pair unconnected: reported once as paired, got " .. tostring(results[1] and results[1][1]))
+
+    order, results = {}, {}
+    dev = Devices:new({ mac = "AA:AA", name = "Phone",
+        backend = pairBackend({ paired = false }, order), controller = controller_stub })
+    dev:pair(function(confirmed, why) table.insert(results, { confirmed, why }) end)
+    drain()
+    check(#order == 0, "pair unconfirmed: no connect or trust, got " .. table.concat(order, ","))
+    check(#results == 1 and results[1][1] == false, "pair unconfirmed: reported once as failed")
+end
+
 if failures > 0 then os.exit(1) end
 print("controller_test: ok")

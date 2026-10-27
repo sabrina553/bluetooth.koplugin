@@ -247,12 +247,18 @@ function Devices:pair(callback)
                 if callback then callback(false, reason) end
                 return
             end
+            -- Paired is the result: phones often pair without staying
+            -- connected, and untrusted they can't reconnect (decision 2026-10-27).
             self:connect(function(connected_confirmed)
                 if not connected_confirmed then
-                    if callback then callback(false) end
-                    return
+                    logger.info("Devices: paired " .. Parse.maskMac(self.mac) .. " but not connected, trusting anyway")
                 end
-                self:trust(callback)
+                self:trust(function(trusted)
+                    if not trusted then
+                        logger.warn("Devices: could not trust " .. Parse.maskMac(self.mac) .. " after pairing")
+                    end
+                    if callback then callback(true) end
+                end)
             end)
         end
         local started, why = self.backend:pair(self.mac, function(result)
@@ -262,9 +268,7 @@ function Devices:pair(callback)
             end
         end)
         if started == false then
-            settled = true
-            if callback then callback(false, why) end
-            return
+            return settle(false, why)
         end
         -- Stops once the session has answered, or it would warn "could not
         -- confirm" long after the failure was shown (reader log 10:48:20).
