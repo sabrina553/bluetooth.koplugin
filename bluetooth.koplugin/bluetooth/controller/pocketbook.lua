@@ -14,8 +14,11 @@
 
 local logger = require("logger")
 local Bluez = require("bluetooth/controller/bluez")
+local Parse = require("bluetooth/controller/bluetoothctl_parse")
 
-local pocketbook = {}
+-- Power is always netagent's; everything else goes to the transport, Bluez
+-- (Compatible) or BluezDbus (Fast), chosen by controller:applyMode().
+local pocketbook = { transport = Bluez }
 
 function pocketbook:new(ctrl)
     self.__index = self
@@ -24,7 +27,6 @@ end
 
 function pocketbook:status()
     logger.dbg("Pocketbook-Netagent: Checking Bluetooth status..")
-    -- stderr dropped: netagent logs every call there, which floods the log.
     local handle = io.popen(Bluez.timeoutPrefix(5) .. 'netagent bt status 2>/dev/null')
     local output = handle:read("*a")
     handle:close()
@@ -39,9 +41,6 @@ function pocketbook:status()
     return true
 end
 
---- Same question as status(), asked in the background: done(true|false), or
---- done(nil) when netagent gave no answer (timed out), so the caller keeps
---- what it had instead of guessing "on" as status() does.
 ---@param done fun(enabled: boolean|nil)
 function pocketbook:readStatus(done)
     Bluez.runAsync(Bluez.timeoutPrefix(5) .. "netagent bt status 2>/dev/null\n", function(output)
@@ -62,54 +61,68 @@ function pocketbook:disable()
     os.execute('netagent bt off >/dev/null 2>&1 &')
 end
 
-function pocketbook:pair(mac)
-    Bluez:pair(mac)
+function pocketbook:setTransport(transport)
+    self.transport = transport
+end
+
+function pocketbook:pair(mac, on_done)
+    return self.transport:pair(mac, on_done)
 end
 
 function pocketbook:unpair(mac)
-    Bluez:unpair(mac)
+    self.transport:unpair(mac)
 end
 
 function pocketbook:connect(mac)
-    Bluez:connect(mac)
+    self.transport:connect(mac)
 end
 
 function pocketbook:disconnect(mac)
-    Bluez:disconnect(mac)
+    self.transport:disconnect(mac)
 end
 
 function pocketbook:trust(mac)
-    Bluez:trust(mac)
+    self.transport:trust(mac)
 end
 
 function pocketbook:untrust(mac)
-    Bluez:untrust(mac)
+    self.transport:untrust(mac)
 end
 
 function pocketbook:block(mac)
-    Bluez:block(mac)
+    self.transport:block(mac)
 end
 
 function pocketbook:unblock(mac)
-    Bluez:unblock(mac)
+    self.transport:unblock(mac)
 end
 
 function pocketbook:knownDevices()
-    Bluez.controller = self.controller
-    return Bluez:knownDevices()
+    self.transport.controller = self.controller
+    return self.transport:knownDevices()
 end
 
 function pocketbook:readSnapshot(done)
-    Bluez.controller = self.controller
-    return Bluez:readSnapshot(done)
+    self.transport.controller = self.controller
+    return self.transport:readSnapshot(done)
 end
 
 function pocketbook:search(duration)
-    return Bluez:search(duration)
+    return self.transport:search(duration)
 end
 
 function pocketbook:info(mac)
-    return Bluez:info(mac)
+    return self.transport:info(mac)
+end
+
+--- Typed device state for Devices:refresh. Cached devices carry this
+--- backend rather than the transport, so it forwards either way.
+function pocketbook:readInfo(mac)
+    if self.transport.readInfo then
+        return self.transport:readInfo(mac)
+    end
+    local output = self.transport:info(mac)
+    return output and Parse.info(output)
 end
 
 return pocketbook

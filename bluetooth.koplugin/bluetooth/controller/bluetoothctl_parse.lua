@@ -25,12 +25,15 @@ end
 
 --- A MAC address reduced to its last two bytes, for logs: the reader's
 --- crash.log is shared when people ask for help, and full addresses identify
---- devices. Anything that isn't a MAC is passed through as text.
+--- devices. Every MAC in the text is masked, including the underscore form in
+--- D-Bus object paths (`dev_00_11_…`); anything else is passed through.
 ---@param mac any
 ---@return string
 function Parse.maskMac(mac)
-    local tail = type(mac) == "string" and mac:match("%x%x:%x%x:%x%x:%x%x:(%x%x:%x%x)$")
-    return tail and ("XX:XX:XX:XX:" .. tail) or tostring(mac)
+    local masked = tostring(mac):gsub("%x%x([:_])%x%x%1%x%x%1%x%x%1(%x%x%1%x%x)", function(sep, tail)
+        return ("XX" .. sep):rep(4) .. tail
+    end)
+    return masked
 end
 
 --- Every device line of a listing, such as `bluetoothctl devices` or its

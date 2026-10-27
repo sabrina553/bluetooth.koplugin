@@ -168,13 +168,143 @@ function bluez:disable()
     run('bluetoothctl power off')
 end
 
-function bluez:pair(mac)
-    logger.dbg("Bluez: Pairing with Bluetooth device: " .. Parse.maskMac(mac))
-    run('bluetoothctl pair ' .. mac)
-    -- os.execute(string.format(
-    --     'echo -e "agent NoInputNoOutput\\ndefault-agent\\npair %s\\nquit\\n" | bluetoothctl &', -- maybe worth repeating this for other commands
-    --     mac
-    -- ))
+-- Pairing needs an agent that stays on the bus to answer the other side
+-- (a phone asks to confirm). A one-shot `bluetoothctl pair` exits at once and
+-- takes its agent with it, so phones failed while keyboards and remotes,
+-- which ask nothing, paired fine (vault Docs/D-Bus findings, 2026-10-13).
+-- One session runs the agent, pairs, and stays open until bluetoothctl
+-- reports the result, at most PAIR_SESSION_S. Ending early matters: a
+-- failed pairing held the next one off for 25 s (reader log 2026-10-26 10:37).
+-- bluetoothctl registers its own agent at start, so the capability goes on
+-- the command line: a later `agent NoInputNoOutput` is refused ("Agent is
+-- already registered") and the default KeyboardDisplay agent then waits for
+-- a typed "yes" to the phone's code (reader log 2026-10-26 10:17). With
+-- NoInputNoOutput, pairing is Just Works. Showing the code on the reader to
+-- confirm is backlog, after the stable release (decision 2026-10-26).
+bluez.PAIR_SESSION_S = 20
+
+-- The running pairing session; only its own check() clears it.
+bluez.pair_session = nil
+
+-- What bluetoothctl prints when a pairing ends, and what it means.
+local PAIR_RESULTS = {
+    { "Pairing successful", true },
+    { "Failed to pair", false },
+    -- BlueZ drops scan results 3 min after a scan; the list isn't refreshed.
+    { "not available", false },
+    { "No default controller available", false },
+}
+
+--- The shell command for one pairing session, or nil if `mac` isn't a MAC
+--- (it goes into a shell command). Output goes to `out`; the feeding side
+--- checks it once a second and quits as soon as a result is there, and
+--- "@@done" marks the end of the session.
+---@param mac string
+---@param out string a path from os.tmpname()
+---@return string|nil
+function bluez.pairCommand(mac, out)
+    if type(mac) ~= "string" or not mac:match("^%x%x:%x%x:%x%x:%x%x:%x%x:%x%x$") then
+        return nil
+    end
+    if type(out) ~= "string" or not out:match("^[%w%._/%-]+$") then
+        return nil
+    end
+    -- One -e per string: BusyBox 1.22 has -E only if built with it.
+    local patterns = {}
+    for _, result in ipairs(PAIR_RESULTS) do
+        table.insert(patterns, "-e '" .. result[1] .. "'")
+    end
+    local feed = ("printf 'default-agent\\npair %s\\n'; i=0; while [ $i -lt %d ]; do sleep 1; "
+        .. "grep -q %s %s && break; i=$((i+1)); done; printf 'quit\\n'")
+        :format(mac, bluez.PAIR_SESSION_S, table.concat(patterns, " "), out)
+    return ("( (%s) | %sbluetoothctl --agent NoInputNoOutput; echo @@done ) >%s 2>&1")
+        :format(feed, bluez.timeoutPrefix(bluez.PAIR_SESSION_S + 5), out)
+end
+
+--- How a session ended: true, false, or nil when it said neither (cut off).
+---@param text string
+---@return boolean|nil
+function bluez.pairResult(text)
+    for _, result in ipairs(PAIR_RESULTS) do
+        if (text or ""):find(result[1], 1, true) then return result[2] end
+    end
+    return nil
+end
+
+-- Lines from the pairing session worth keeping: which agent answered, what
+-- the other side asked for, and how it ended. A phone failing to pair left
+-- nothing to go on (reader log 2026-10-26 10:15).
+local PAIR_LOG_PATTERNS = { "[Aa]gent", "[Aa]ttempting", "[Rr]equest", "[Pp]asskey", "[Cc]onfirm", "[Ff]ailed",
+    "[Pp]airing successful", "[Pp]aired: ", "[Ee]rror", "[Nn]ot available", "[Aa]uthenticat" }
+
+--- The session's lines worth logging, masked. Pure, for tests.
+---@param text string
+---@return string[]
+function bluez.pairLogLines(text)
+    local lines = {}
+    -- bluetoothctl repaints its prompt with escape codes and \r. The prompt
+    -- shows a device name ("[Someone's iPhone]#"), so it goes, and so does
+    -- any 6-digit pairing code: logs are shared with testers.
+    text = (text or ""):gsub("\27%[[%d;]*%a", ""):gsub("\r", "\n")
+    for line in text:gmatch("[^\n]+") do
+        line = line:gsub("%[[^%]]*%]#%s*", ""):gsub("^%s+", "")
+        for _, pattern in ipairs(PAIR_LOG_PATTERNS) do
+            if line:find(pattern) then
+                line = Parse.maskMac(line):gsub("%f[%d]%d%d%d%d%d%d%f[%D]", "NNNNNN")
+                table.insert(lines, line)
+                break
+            end
+        end
+    end
+    return lines
+end
+
+--- Starts a pairing session; false plus "invalid" or "busy" when it didn't
+--- start. One session at a time: two at once both claimed the default agent and mixed their output
+--- (reader log 2026-10-26 10:23:09 and 10:23:11). `on_done(result)` runs
+--- when the session ends, with bluez.pairResult's answer.
+---@param mac string
+---@param on_done fun(result: boolean|nil)|nil
+---@return boolean, string|nil
+function bluez:pair(mac, on_done)
+    local out = os.tmpname()
+    local cmd = bluez.pairCommand(mac, out)
+    if not cmd then
+        os.remove(out)
+        logger.warn("Bluez: not pairing, not a MAC: " .. Parse.maskMac(tostring(mac)))
+        return false, "invalid"
+    end
+    if bluez.pair_session then
+        logger.info("Bluez: a pairing session is still running, not starting another for " .. Parse.maskMac(mac))
+        os.remove(out)
+        return false, "busy"
+    end
+    local session = {}
+    bluez.pair_session = session
+    logger.dbg("Bluez: Pairing with Bluetooth device (agent session " .. bluez.PAIR_SESSION_S .. "s): " .. Parse.maskMac(mac))
+    -- Not run(): its >/dev/null would come last and win over the file.
+    os.execute(cmd .. " &")
+    local UIManager = require("ui/uimanager")
+    -- Ticks, not os.time: a suspend jumps the clock but pauses this timer
+    -- and the shell's sleep alike.
+    local ticks_left = bluez.PAIR_SESSION_S + 7
+    local function check()
+        local f = io.open(out, "r")
+        local text = f and f:read("*a") or ""
+        if f then f:close() end
+        ticks_left = ticks_left - 1
+        if not text:find("@@done", 1, true) and ticks_left > 0 then
+            return UIManager:scheduleIn(1, check)
+        end
+        os.remove(out)
+        if bluez.pair_session == session then bluez.pair_session = nil end
+        for _, line in ipairs(bluez.pairLogLines(text)) do
+            logger.info("Bluez: pair session:", line)
+        end
+        if on_done then on_done(bluez.pairResult(text)) end
+    end
+    UIManager:scheduleIn(1, check)
+    return true
 end
 
 function bluez:unpair(mac)
@@ -277,6 +407,10 @@ function bluez:knownDevices()
 end
 
 local SNAPSHOT_TIMEOUT_S = 20
+-- First check soon, then back off: a D-Bus read finishes in about 5 ms but
+-- waited a full 0.2 s to be picked up (0.23 s against 0.42 s for
+-- bluetoothctl on the reader, 2026-10-13). Slow reads cost a few more checks.
+local SNAPSHOT_POLL_FIRST_S = 0.05
 local SNAPSHOT_POLL_S = 0.2
 local snapshot_counter = 0
 
@@ -331,6 +465,7 @@ function bluez.runAsync(script, done)
     local function cleanup()
         os.remove(base); os.remove(script_path); os.remove(out_path)
     end
+    local delay = SNAPSHOT_POLL_FIRST_S
     local function poll()
         local out = io.open(out_path, "r")
         if out then
@@ -343,9 +478,10 @@ function bluez.runAsync(script, done)
             cleanup()
             return done(nil)
         end
-        UIManager:scheduleIn(SNAPSHOT_POLL_S, poll)
+        delay = math.min(delay * 2, SNAPSHOT_POLL_S)
+        UIManager:scheduleIn(delay, poll)
     end
-    UIManager:scheduleIn(SNAPSHOT_POLL_S, poll)
+    UIManager:scheduleIn(delay, poll)
 end
 
 --- Devices from the output of snapshotScript, or nil if the read failed

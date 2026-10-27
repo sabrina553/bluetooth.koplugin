@@ -2,6 +2,7 @@ local DataStorage = require("datastorage")
 local LuaSettings = require("luasettings")
 local logger = require("logger")
 local Version = require("bluetooth/ota/version")
+local BackendSelect = require("bluetooth/controller/backend_select")
 
 ---@class BluetoothSettingsData
 ---@field disable_on_suspend boolean
@@ -9,6 +10,8 @@ local Version = require("bluetooth/ota/version")
 ---@field last_on_wake boolean
 ---@field radio_was_on boolean
 ---@field update_channel string "stable" | "beta" | "development"
+---@field backend_mode string "auto" | "fast" | "compatible"
+---@field live_updates boolean
 
 local DEFAULTS = {
     disable_on_suspend = false,
@@ -16,6 +19,8 @@ local DEFAULTS = {
     last_on_wake = false,
     radio_was_on = false,
     update_channel = "stable",
+    backend_mode = "auto",
+    live_updates = false,
 }
 
 local function shallowCopy(t)
@@ -137,6 +142,17 @@ function BluetoothSettings:setRadioWasOn(radio_was_on)
     self:write()
 end
 
+--- Live updates while the menu is open (Fast mode only). Experimental and
+--- off by default for the stable release (decision 2026-10-26).
+function BluetoothSettings:getLiveUpdates()
+    return self.data.live_updates or DEFAULTS.live_updates
+end
+
+function BluetoothSettings:toggleLiveUpdates()
+    self.data.live_updates = not self:getLiveUpdates()
+    self:write()
+end
+
 function BluetoothSettings:getUpdateChannel()
     local channel = self.data.update_channel or DEFAULTS.update_channel
     if not Version.isChannel(channel) then
@@ -155,6 +171,21 @@ function BluetoothSettings:setUpdateChannel(channel)
         return
     end
     self.data.update_channel = channel
+    self:write()
+end
+
+function BluetoothSettings:getBackendMode()
+    local mode = self.data.backend_mode
+    return BackendSelect.MODES[mode] and mode or DEFAULTS.backend_mode
+end
+
+---@param mode string "auto" | "fast" | "compatible"
+function BluetoothSettings:setBackendMode(mode)
+    if not BackendSelect.MODES[mode] then
+        logger.warn("Bluetooth Settings: ignoring unknown backend mode", tostring(mode))
+        return
+    end
+    self.data.backend_mode = mode
     self:write()
 end
 

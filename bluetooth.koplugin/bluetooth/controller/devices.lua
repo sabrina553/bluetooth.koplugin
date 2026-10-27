@@ -51,7 +51,11 @@ function Devices:fromScan(mac, name, backend, ctrl)
 end
 
 function Devices:parseInfo(output)
-    local info = Parse.info(output)
+    return self:applyInfo(Parse.info(output))
+end
+
+--- State in the shape of Parse.info, from either backend.
+function Devices:applyInfo(info)
     self.mac = info.mac or self.mac
     self.name = info.name or self.name
     self.paired = info.paired
@@ -68,6 +72,15 @@ function Devices:refresh()
         return self
     end
 
+    -- Fast mode reads typed state over D-Bus; Compatible parses bluetoothctl.
+    if self.backend.readInfo then
+        local info = self.backend:readInfo(self.mac)
+        if info then
+            self:applyInfo(info)
+        end
+        return self
+    end
+
     local output = self.backend:info(self.mac)
     if output then
         self:parseInfo(output)
@@ -80,11 +93,17 @@ end
 ---@param expected boolean
 ---@param callback fun(confirmed: boolean)|nil called once, with true if state was confirmed
 ---@param attempt integer|nil internal, do not pass
-local function pollField(self, field, expected, callback, attempt, release)
+---@param max_attempts integer|nil defaults to Poll.MAX_ATTEMPTS
+---@param stopped (fun(): boolean)|nil when true, the answer came another way: stop quietly
+local function pollField(self, field, expected, callback, attempt, release, max_attempts, stopped)
     attempt = attempt or 1
     -- Held from the first check to the final answer, see bluetooth/standby.lua.
     release = release or Standby.hold()
-    local max_attempts = Poll.MAX_ATTEMPTS
+    max_attempts = max_attempts or Poll.MAX_ATTEMPTS
+    if stopped and stopped() then
+        release()
+        return
+    end
 
     self:refresh()
 
@@ -104,7 +123,7 @@ local function pollField(self, field, expected, callback, attempt, release)
     end
 
     UIManager:scheduleIn(Poll.delay(attempt), function()
-        pollField(self, field, expected, callback, attempt + 1, release)
+        pollField(self, field, expected, callback, attempt + 1, release, max_attempts, stopped)
     end)
 end
 
@@ -216,10 +235,16 @@ function Devices:pair(callback)
             if callback then callback(false) end
             return
         end
-        self.backend:pair(self.mac)
-        pollField(self, "paired", true, function(paired_confirmed)
-            if not paired_confirmed then
-                if callback then callback(false) end
+        -- The first answer wins: the session's own result (a failure is
+        -- known within a second, not after the whole confirm budget) or the
+        -- paired poll. An explicit false from pair() means "not started",
+        -- with the reason ("busy" or "invalid").
+        local settled = false
+        local function settle(ok, reason)
+            if settled then return end
+            settled = true
+            if not ok then
+                if callback then callback(false, reason) end
                 return
             end
             self:connect(function(connected_confirmed)
@@ -229,7 +254,23 @@ function Devices:pair(callback)
                 end
                 self:trust(callback)
             end)
+        end
+        local started, why = self.backend:pair(self.mac, function(result)
+            if result == false then
+                logger.info("Devices: pairing " .. Parse.maskMac(self.mac) .. " failed, see the pair session lines")
+                settle(false)
+            end
         end)
+        if started == false then
+            settled = true
+            if callback then callback(false, why) end
+            return
+        end
+        -- Stops once the session has answered, or it would warn "could not
+        -- confirm" long after the failure was shown (reader log 10:48:20).
+        pollField(self, "paired", true, function(paired_confirmed)
+            settle(paired_confirmed)
+        end, nil, nil, Poll.PAIR_ATTEMPTS, function() return settled end)
     end)
 end
 

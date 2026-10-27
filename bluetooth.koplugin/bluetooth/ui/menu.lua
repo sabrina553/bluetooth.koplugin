@@ -10,7 +10,17 @@ local ButtonDialog = require("ui/widget/buttondialog")
 local logger = require("logger")
 
 local MenuFind = require("bluetooth/ui/menu_find")
+local DbusMonitor = require("bluetooth/controller/dbus_monitor")
 local PluginMetadata = require("bluetooth/plugin_metadata")
+
+-- Why a pairing didn't start, or nil if it did.
+local function pairRefusedText(reason)
+    if reason == "busy" then
+        return _("Another pairing is still running. Try again in a few seconds.")
+    elseif reason == "invalid" then
+        return _("Can't pair: this device's address is not valid.")
+    end
+end
 
 local function displayName(dev)
     if dev.name and dev.name ~= "" then
@@ -86,7 +96,7 @@ end
 -- the same shape: show a "Verb-ing…" toast, perform the toggle, then show
 -- a confirmation or failure toast based on the resulting state.
 -- Confirmation toasts: long enough to read "Connected", short enough not to
--- linger over the redrawn menu (Sabrina, 2026-10-13: 1 s looked ugly).
+-- linger over the redrawn menu.
 local DONE_TOAST_S = 0.25
 
 local TOGGLE_ACTIONS = {
@@ -179,6 +189,13 @@ function BluetoothMenu:buildMenuTable()
         {
             text = _("Bluetooth"),
             callback = function(touchmenu_instance)
+                -- The PocketBook radio takes about 5 s to switch and looks
+                -- hung, so people tap again; each tap used to flip it back.
+                -- Ignored quietly while that switch is under way.
+                if self.controller:isUserSwitching() then
+                    logger.dbg("Bluetooth: radio is still switching, ignoring the tap")
+                    return
+                end
                 local msg
                 -- The tick may come from the cache; toggle() re-checks, so
                 -- check first or the message and the action disagree.
@@ -247,6 +264,11 @@ end
 -- plugin switching the radio), see the 2026-10-13 session note.
 local MENU_POLL_S = 3
 
+-- A first look soon after opening, so a menu closed before the first poll
+-- isn't mistaken for a changed TouchMenu layout (WARN on the reader for a
+-- menu simply closed within 3 s, 2026-10-26 10:37:48).
+local FIRST_LOOK_S = 0.5
+
 function BluetoothMenu:getTopMenu()
     self:refresh()
     self:startPolling()
@@ -259,7 +281,7 @@ function BluetoothMenu:deviceSignature()
     for _, dev in ipairs(self.controller.known_devices or {}) do
         parts[#parts + 1] = table.concat({
             dev.mac, dev.name or "", tostring(dev.paired), tostring(dev.connected),
-            tostring(dev.starred),
+            tostring(dev.starred), tostring(dev.blocked),
         }, "|")
     end
     return table.concat(parts, ";")
@@ -278,9 +300,9 @@ function BluetoothMenu:startPolling()
         end
         if not self:findTouchMenu() then
             -- Closed. Settings and About do not count: back returns to us.
-            -- Another page showing is normal, see MenuFind.anyOpen. No menu at
-            -- all on the first poll may mean KOReader's layout changed (or the
-            -- menu was closed within MENU_POLL_S), so log the layout.
+            -- Another page showing is normal, see MenuFind.anyOpen. Never
+            -- found, not even at the first look, may mean KOReader's layout
+            -- changed, so log the layout.
             if seen then
                 logger.dbg("Bluetooth: menu closed, polling stopped")
             elseif MenuFind.anyOpen(UIManager._window_stack) then
@@ -291,28 +313,70 @@ function BluetoothMenu:startPolling()
                     .. MenuFind.describe(UIManager._window_stack))
             end
             self._poll_token = nil
+            self:stopLiveMonitor()
             return
         end
         seen = true
-        -- The scan screen polls the list itself.
-        if not self._scan_token then
-            self.controller:statusCached(function()
-                UIManager:nextTick(function()
-                    if self._poll_token == token then self:refresh() end
-                end)
-            end)
-            if self.controller.is_enabled then
-                local before = self:deviceSignature()
-                self.controller:knownDevices(function(fresh)
-                    if fresh and self._poll_token == token and self:deviceSignature() ~= before then
-                        self:refreshMenu()
-                    end
-                end)
-            end
-        end
+        self:checkNow(token)
+        self:updateLiveMonitor(token)
         UIManager:scheduleIn(MENU_POLL_S, tick)
     end
+    self:updateLiveMonitor(token)
+    UIManager:scheduleIn(FIRST_LOOK_S, function()
+        if self._poll_token == token and self:findTouchMenu() then
+            seen = true
+        end
+    end)
     UIManager:scheduleIn(MENU_POLL_S, tick)
+end
+
+--- One look at the radio and the devices, redrawing if something changed.
+--- Run by the poll, and by live updates as soon as a signal arrives.
+function BluetoothMenu:checkNow(token)
+    -- The scan screen polls the list itself.
+    if self._scan_token or self._poll_token ~= token then return end
+    self.controller:statusCached(function()
+        UIManager:nextTick(function()
+            if self._poll_token == token then self:refresh() end
+        end)
+    end)
+    if self.controller.is_enabled then
+        local before = self:deviceSignature()
+        self.controller:knownDevices(function(fresh)
+            if fresh and self._poll_token == token and self:deviceSignature() ~= before then
+                self:refreshMenu()
+            end
+        end)
+    end
+end
+
+--- Runs the live-updates monitor while this menu is open, the setting is on
+--- and Fast mode is in use; stops it otherwise. Checked on every poll, so a
+--- mode switch or a fallback to Compatible stops it within MENU_POLL_S.
+function BluetoothMenu:updateLiveMonitor(token)
+    local wanted = token ~= nil and self._poll_token == token
+        and self.settings:getLiveUpdates() and self.controller:activeMode() == "fast"
+        and self.controller.is_enabled
+    if wanted and not self._monitor then
+        self._monitor = DbusMonitor.start(function()
+            -- Several signals arrive together; one check covers them.
+            if self._live_pending then return end
+            self._live_pending = true
+            UIManager:nextTick(function()
+                self._live_pending = false
+                self:checkNow(token)
+            end)
+        end)
+    elseif not wanted then
+        self:stopLiveMonitor()
+    end
+end
+
+function BluetoothMenu:stopLiveMonitor()
+    if self._monitor then
+        self._monitor:stop()
+        self._monitor = nil
+    end
 end
 
 function BluetoothMenu:refresh(touchmenu_instance)
@@ -359,13 +423,28 @@ end
 ---@param action table one of the TOGGLE_ACTIONS entries
 ---@param touchmenu_instance any
 function BluetoothMenu:performToggle(dev, action, touchmenu_instance)
+    -- BlueZ refuses a blocked device's input, though the remote can still
+    -- bring up a link that reads as connected (reader log 2026-10-26 09:35),
+    -- so a connect would "succeed" and do nothing.
+    if action == TOGGLE_ACTIONS.connect and dev.blocked then
+        UIManager:show(InfoMessage:new{
+            text = dev.name .. _(" is blocked. Unblock it first: hold the device for options."),
+            timeout = 3,
+        })
+        return
+    end
     local msg = InfoMessage:new{
         text = dev[action.field] and action.inactive_text or action.active_text
     }
     UIManager:show(msg)
 
-    dev[action.method](dev, function(confirmed)
+    dev[action.method](dev, function(confirmed, reason)
         UIManager:close(msg)
+        local refused = pairRefusedText(reason)
+        if refused then
+            UIManager:show(InfoMessage:new{ text = refused, timeout = 3 })
+            return self:refresh(touchmenu_instance)
+        end
         -- The toast reads dev, not a fresh lookup: pollField confirmed the
         -- result on this object, while a poll mid-action can install a newer
         -- one read before the action finished (it said "Disconnected" after a
@@ -398,12 +477,14 @@ function BluetoothMenu:pairedDevices(menu, knownDevices)
             -- Insert the menu item
             if dev.paired == true then
                 table.insert(menu, {
-                    text = (dev.starred and "★ " or "") .. dev.name,
+                    text = (dev.starred and "★ " or "") .. dev.name .. (dev.blocked and _(" (blocked)") or ""),
                     callback = function(touchmenu_instance)
                         self:performToggle(dev, TOGGLE_ACTIONS.connect, touchmenu_instance)
                     end,
+                    -- A blocked device's link carries no input, so it isn't
+                    -- shown as connected.
                     checked_func = function()
-                        return dev.connected
+                        return dev.connected and not dev.blocked
                     end,
                     hold_callback = function(touchmenu_instance)
                         self:showDeviceActions(dev, touchmenu_instance)
@@ -453,9 +534,58 @@ function BluetoothMenu:getSettingsMenu()
             separator = true,
         },
         {
+            text_func = function()
+                local names = { fast = _("Fast"), compatible = _("Compatible") }
+                return T(_("Backend: %1"), names[self.controller:activeMode()])
+            end,
+            sub_item_table = self:getBackendModeMenu(),
+        },
+        {
+            text = _("Live updates (experimental)"),
+            help_text = _("While this menu is open in Fast mode, update it as soon as a device changes instead of every 3 seconds."),
+            enabled_func = function()
+                return self.controller:activeMode() == "fast"
+            end,
+            checked_func = function()
+                return self.settings:getLiveUpdates()
+            end,
+            callback = function()
+                self.settings:toggleLiveUpdates()
+                UIManager:broadcastEvent(Event:new("BluetoothSettingsChanged"))
+            end,
+            keep_menu_open = true,
+            separator = true,
+        },
+        {
             text = _("About"),
             sub_item_table = self:getAboutMenu(),
         },
+    }
+end
+
+--- Fast reads over D-Bus, Compatible uses bluetoothctl only; see vault
+--- Docs/D-Bus backend plan. Applies at once, no restart.
+function BluetoothMenu:getBackendModeMenu()
+    local function item(mode, text)
+        return {
+            text = text,
+            checked_func = function()
+                return self.settings:getBackendMode() == mode
+            end,
+            radio = true,
+            callback = function(touchmenu_instance)
+                self.settings:setBackendMode(mode)
+                self.controller:applyMode(true)
+                UIManager:broadcastEvent(Event:new("BluetoothSettingsChanged"))
+                touchmenu_instance:updateItems()
+            end,
+            keep_menu_open = true,
+        }
+    end
+    return {
+        item("auto", _("Automatic")),
+        item("fast", _("Fast (D-Bus)")),
+        item("compatible", _("Compatible (bluetoothctl)")),
     }
 end
 
@@ -591,9 +721,12 @@ function BluetoothMenu:pairFoundDevice(dev, on_refresh)
     local msg = InfoMessage:new{ text = _("Pairing with ") .. displayName(dev) .. "…" }
     UIManager:show(msg)
 
-    dev:pair(function(confirmed)
+    dev:pair(function(confirmed, reason)
         UIManager:close(msg)
-        if confirmed then
+        local refused = pairRefusedText(reason)
+        if refused then
+            UIManager:show(InfoMessage:new{ text = refused, timeout = 3 })
+        elseif confirmed then
             UIManager:show(InfoMessage:new{
                 text = _("Paired with ") .. displayName(dev),
                 timeout = 2,
