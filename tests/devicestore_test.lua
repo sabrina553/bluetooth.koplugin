@@ -1,5 +1,6 @@
 -- Run from the repo root: luajit tests/devicestore_test.lua
-package.path = "bluetooth.koplugin/?.lua;" .. package.path
+package.path = "bluetooth.koplugin/?.lua;tests/?.lua;" .. package.path
+local rejectDescription = require("helpers").rejectDescription
 package.preload["logger"] = function()
     local noop = function() end
     return { dbg = noop, info = noop, warn = noop, err = noop }
@@ -20,9 +21,7 @@ local Store = require("bluetooth/devicestore")
 
 local failures = 0
 local function check(cond, message)
-    -- A string here means a check(description, actual, expected) call from
-    -- the other test style, which would always pass (it did, 2026-10-26).
-    assert(type(cond) ~= "string", "check(cond, message) called with a description first: " .. tostring(cond))
+    rejectDescription(cond)
     if not cond then failures = failures + 1; print("FAIL " .. message) end
 end
 
