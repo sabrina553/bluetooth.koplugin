@@ -517,8 +517,12 @@ end
 
 --- The user's own switch: its intent is saved as the state to restore at a
 --- cold start. disable() alone is not, since disable-on-suspend uses it.
-function controller:toggle(callback)
-    self:status()
+--- status_fresh: the caller has just run status(), so skip a second
+--- blocking read (decision 2026-10-27).
+---@param callback fun(confirmed: boolean, reason: string|nil)|nil
+---@param status_fresh boolean|nil
+function controller:toggle(callback, status_fresh)
+    if not status_fresh then self:status() end
     local turn_on = not self:wantsEnabled()
     if self.settings then self.settings:setRadioWasOn(turn_on) end
     user_switching = true

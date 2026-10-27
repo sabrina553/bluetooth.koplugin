@@ -242,6 +242,27 @@ do
     check("done switching: a tap toggles", toggles, 1)
 end
 
+-- One tap reads the radio status once: each read is a blocking shell-out
+-- on PocketBook (decision 2026-10-27). Uses the real toggle().
+do
+    shown = {}
+    package.preload["device"] = function() return { model = "test" } end
+    local Controller = require("bluetooth/controller/controller")
+    local reads, sent = 0, nil
+    menu.controller.isUserSwitching = function() return false end
+    menu.controller.status = function(self) reads = reads + 1; self.is_enabled = false end
+    menu.controller.wantsEnabled = Controller.wantsEnabled
+    menu.controller.isEnabling = Controller.isEnabling
+    menu.controller.isDisabling = Controller.isDisabling
+    menu.controller.toggle = Controller.toggle
+    menu.controller.enable = function() sent = "on" end
+    menu.controller.disable = function() sent = "off" end
+    menu:buildMenuTable()[1].callback(nil)
+    check("one tap: status reads", reads, 1)
+    check("one tap: enables", sent, "on")
+    check("one tap: message", last().text, "Enabling Bluetooth")
+end
+
 if failures > 0 then
     print(failures .. " failure(s)")
     os.exit(1)
