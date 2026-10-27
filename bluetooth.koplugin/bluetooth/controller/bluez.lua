@@ -186,8 +186,11 @@ bluez.PAIR_SESSION_S = 20
 -- The running pairing session; only its own check() clears it.
 bluez.pair_session = nil
 
--- What bluetoothctl prints when a pairing ends, either way.
-local PAIR_RESULT = "Pairing successful|Failed to pair"
+-- What bluetoothctl prints when a pairing ends, and what it means.
+local PAIR_RESULTS = {
+    { "Pairing successful", true },
+    { "Failed to pair", false },
+}
 
 --- The shell command for one pairing session, or nil if `mac` isn't a MAC
 --- (it goes into a shell command). Output goes to `out`; the feeding side
@@ -203,9 +206,14 @@ function bluez.pairCommand(mac, out)
     if type(out) ~= "string" or not out:match("^[%w%._/%-]+$") then
         return nil
     end
+    -- One -e per string: BusyBox 1.22 has -E only if built with it.
+    local patterns = {}
+    for _, result in ipairs(PAIR_RESULTS) do
+        table.insert(patterns, "-e '" .. result[1] .. "'")
+    end
     local feed = ("printf 'default-agent\\npair %s\\n'; i=0; while [ $i -lt %d ]; do sleep 1; "
-        .. "grep -q -E '%s' %s && break; i=$((i+1)); done; printf 'quit\\n'")
-        :format(mac, bluez.PAIR_SESSION_S, PAIR_RESULT, out)
+        .. "grep -q %s %s && break; i=$((i+1)); done; printf 'quit\\n'")
+        :format(mac, bluez.PAIR_SESSION_S, table.concat(patterns, " "), out)
     return ("( (%s) | %sbluetoothctl --agent NoInputNoOutput; echo @@done ) >%s 2>&1")
         :format(feed, bluez.timeoutPrefix(bluez.PAIR_SESSION_S + 5), out)
 end
@@ -214,8 +222,9 @@ end
 ---@param text string
 ---@return boolean|nil
 function bluez.pairResult(text)
-    if (text or ""):find("Pairing successful", 1, true) then return true end
-    if (text or ""):find("Failed to pair", 1, true) then return false end
+    for _, result in ipairs(PAIR_RESULTS) do
+        if (text or ""):find(result[1], 1, true) then return result[2] end
+    end
     return nil
 end
 

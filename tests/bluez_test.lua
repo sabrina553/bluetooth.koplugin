@@ -196,6 +196,7 @@ do
     local cmd = Bluez.pairCommand("00:11:22:33:44:55", "/tmp/lua_test")
     check("pair: capped a little past the session, agent set at start",
         cmd and cmd:find("| timeout %-k 1 25 bluetoothctl %-%-agent NoInputNoOutput; echo @@done %) >/tmp/lua_test 2>&1$") ~= nil, true)
+    check("pair: one grep -e per result, no -E", cmd and cmd:find("grep -q -e 'Pairing successful' -e 'Failed to pair' ", 1, true) ~= nil, true)
     check("pair: not a MAC is refused", Bluez.pairCommand("00:11:22:33:44:55; reboot", "/tmp/x"), nil)
     check("pair: nil is refused", Bluez.pairCommand(nil, "/tmp/x"), nil)
     check("pair: an odd output path is refused", Bluez.pairCommand("00:11:22:33:44:55", "/tmp/x; reboot"), nil)
