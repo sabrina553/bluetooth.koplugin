@@ -241,21 +241,37 @@ end
 
 -- One pairing session at a time (reader log 2026-10-26 10:23:09 and 10:23:11).
 do
-    local real_execute, saved_clock = os.execute, Bluez.clock
+    local real_execute = os.execute
     local started = 0
     os.execute = function(cmd) if cmd:find("bluetoothctl", 1, true) then started = started + 1 end return 0 end
     local UIManager = require("ui/uimanager")
-    UIManager.scheduleIn = UIManager.scheduleIn or function() end
-    local now = 1000
-    Bluez.clock = function() return now end
-    Bluez.pair_busy_until = nil
+    local saved_schedule = UIManager.scheduleIn
+    local queue = {}
+    UIManager.scheduleIn = function(_, _, fn) table.insert(queue, fn) end
+    local function tick() local fn = table.remove(queue, 1); if fn then fn() end end
+    local function finish() while #queue > 0 do tick() end end
+    Bluez.pair_session = nil
+
+    check("pair: not a MAC while idle is refused", Bluez:pair("nope"), false)
+    check("pair: not a MAC does not block", Bluez.pair_session, nil)
     check("pair: first session starts", Bluez:pair("00:11:22:33:44:55"), true)
     check("pair: a second one while it runs does not", Bluez:pair("00:11:22:33:44:66"), false)
     check("pair: only one bluetoothctl started", started, 1)
-    now = now + Bluez.PAIR_SESSION_S + 5
-    check("pair: after the session's cap a new one starts", Bluez:pair("00:11:22:33:44:66"), true)
-    check("pair: not a MAC does not start or block", Bluez:pair("nope"), false)
-    os.execute, Bluez.clock, Bluez.pair_busy_until = real_execute, saved_clock, nil
+    -- No @@done ever arrives (the os.execute above is fake): the session
+    -- still ends after its ticks, whatever the wall clock does.
+    for _ = 1, Bluez.PAIR_SESSION_S do tick() end
+    check("pair: still busy before its ticks run out", Bluez:pair("00:11:22:33:44:66"), false)
+    finish()
+    check("pair: free once its check() ends", Bluez.pair_session, nil)
+
+    -- A finishing session leaves a newer session's flag alone.
+    check("pair: next session starts", Bluez:pair("00:11:22:33:44:66"), true)
+    local newer = {}
+    Bluez.pair_session = newer
+    finish()
+    check("pair: an old session doesn't clear a newer one", Bluez.pair_session == newer, true)
+
+    os.execute, UIManager.scheduleIn, Bluez.pair_session = real_execute, saved_schedule, nil
 end
 
 if failures > 0 then

@@ -183,8 +183,8 @@ end
 -- confirm is backlog, after the stable release (Sabrina, 2026-10-26).
 bluez.PAIR_SESSION_S = 20
 
--- A field so tests can move time.
-bluez.clock = os.time
+-- The running pairing session; only its own check() clears it.
+bluez.pair_session = nil
 
 -- What bluetoothctl prints when a pairing ends, either way.
 local PAIR_RESULT = "Pairing successful|Failed to pair"
@@ -262,28 +262,30 @@ function bluez:pair(mac, on_done)
         logger.warn("Bluez: not pairing, not a MAC: " .. Parse.maskMac(tostring(mac)))
         return false
     end
-    local now = bluez.clock()
-    if bluez.pair_busy_until and now < bluez.pair_busy_until then
+    if bluez.pair_session then
         logger.info("Bluez: a pairing session is still running, not starting another for " .. Parse.maskMac(mac))
         os.remove(out)
         return false
     end
-    -- The session's own cap (PAIR_SESSION_S + 5).
-    bluez.pair_busy_until = now + bluez.PAIR_SESSION_S + 5
+    local session = {}
+    bluez.pair_session = session
     logger.dbg("Bluez: Pairing with Bluetooth device (agent session " .. bluez.PAIR_SESSION_S .. "s): " .. Parse.maskMac(mac))
     -- Not run(): its >/dev/null would come last and win over the file.
     os.execute(cmd .. " &")
     local UIManager = require("ui/uimanager")
-    local deadline = now + bluez.PAIR_SESSION_S + 7
+    -- Ticks, not os.time: a suspend jumps the clock but pauses this timer
+    -- and the shell's sleep alike.
+    local ticks_left = bluez.PAIR_SESSION_S + 7
     local function check()
         local f = io.open(out, "r")
         local text = f and f:read("*a") or ""
         if f then f:close() end
-        if not text:find("@@done", 1, true) and bluez.clock() < deadline then
+        ticks_left = ticks_left - 1
+        if not text:find("@@done", 1, true) and ticks_left > 0 then
             return UIManager:scheduleIn(1, check)
         end
         os.remove(out)
-        bluez.pair_busy_until = nil
+        if bluez.pair_session == session then bluez.pair_session = nil end
         for _, line in ipairs(bluez.pairLogLines(text)) do
             logger.info("Bluez: pair session:", line)
         end
