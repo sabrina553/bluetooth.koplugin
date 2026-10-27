@@ -247,25 +247,25 @@ function bluez.pairLogLines(text)
     return lines
 end
 
---- Starts a pairing session; false when it didn't start. One session at a
---- time: two at once both claimed the default agent and mixed their output
+--- Starts a pairing session; false plus "invalid" or "busy" when it didn't
+--- start. One session at a time: two at once both claimed the default agent and mixed their output
 --- (reader log 2026-10-26 10:23:09 and 10:23:11). `on_done(result)` runs
 --- when the session ends, with bluez.pairResult's answer.
 ---@param mac string
 ---@param on_done fun(result: boolean|nil)|nil
----@return boolean
+---@return boolean, string|nil
 function bluez:pair(mac, on_done)
     local out = os.tmpname()
     local cmd = bluez.pairCommand(mac, out)
     if not cmd then
         os.remove(out)
         logger.warn("Bluez: not pairing, not a MAC: " .. Parse.maskMac(tostring(mac)))
-        return false
+        return false, "invalid"
     end
     if bluez.pair_session then
         logger.info("Bluez: a pairing session is still running, not starting another for " .. Parse.maskMac(mac))
         os.remove(out)
-        return false
+        return false, "busy"
     end
     local session = {}
     bluez.pair_session = session

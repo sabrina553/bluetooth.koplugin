@@ -252,10 +252,10 @@ do
     local function finish() while #queue > 0 do tick() end end
     Bluez.pair_session = nil
 
-    check("pair: not a MAC while idle is refused", Bluez:pair("nope"), false)
+    check("pair: not a MAC while idle is refused", select(2, Bluez:pair("nope")), "invalid")
     check("pair: not a MAC does not block", Bluez.pair_session, nil)
     check("pair: first session starts", Bluez:pair("00:11:22:33:44:55"), true)
-    check("pair: a second one while it runs does not", Bluez:pair("00:11:22:33:44:66"), false)
+    check("pair: a second one while it runs is busy", select(2, Bluez:pair("00:11:22:33:44:66")), "busy")
     check("pair: only one bluetoothctl started", started, 1)
     -- No @@done ever arrives (the os.execute above is fake): the session
     -- still ends after its ticks, whatever the wall clock does.

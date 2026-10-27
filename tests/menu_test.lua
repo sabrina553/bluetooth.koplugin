@@ -140,6 +140,17 @@ do
     check("busy: says another pairing is running", (last().text or ""):find("Another pairing is still running", 1, true) ~= nil, true)
 end
 
+-- The scan screen, where unpaired devices are paired, says why too.
+do
+    for _, case in ipairs({ { "busy", "Another pairing is still running" }, { "invalid", "address is not valid" } }) do
+        shown = {}
+        local dev = { mac = "00:11:22:33:44:55", name = "Phone", paired = false,
+            pair = function(_, cb) cb(false, case[1]) end }
+        menu:pairFoundDevice(dev)
+        check("scan " .. case[1] .. ": says why", (last().text or ""):find(case[2], 1, true) ~= nil, true)
+    end
+end
+
 -- The signature changes when a device is blocked, so the row redraws.
 do
     local dev = { mac = "A", name = "Remote", paired = true }

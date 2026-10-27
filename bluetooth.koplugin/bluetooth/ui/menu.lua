@@ -13,6 +13,15 @@ local MenuFind = require("bluetooth/ui/menu_find")
 local DbusMonitor = require("bluetooth/controller/dbus_monitor")
 local PluginMetadata = require("bluetooth/plugin_metadata")
 
+-- Why a pairing didn't start, or nil if it did.
+local function pairRefusedText(reason)
+    if reason == "busy" then
+        return _("Another pairing is still running. Try again in a few seconds.")
+    elseif reason == "invalid" then
+        return _("Can't pair: this device's address is not valid.")
+    end
+end
+
 local function displayName(dev)
     if dev.name and dev.name ~= "" then
         if dev.name == "Unknown" then
@@ -431,11 +440,9 @@ function BluetoothMenu:performToggle(dev, action, touchmenu_instance)
 
     dev[action.method](dev, function(confirmed, reason)
         UIManager:close(msg)
-        if reason == "busy" then
-            UIManager:show(InfoMessage:new{
-                text = _("Another pairing is still running. Try again in a few seconds."),
-                timeout = 3,
-            })
+        local refused = pairRefusedText(reason)
+        if refused then
+            UIManager:show(InfoMessage:new{ text = refused, timeout = 3 })
             return self:refresh(touchmenu_instance)
         end
         -- The toast reads dev, not a fresh lookup: pollField confirmed the
@@ -714,9 +721,12 @@ function BluetoothMenu:pairFoundDevice(dev, on_refresh)
     local msg = InfoMessage:new{ text = _("Pairing with ") .. displayName(dev) .. "…" }
     UIManager:show(msg)
 
-    dev:pair(function(confirmed)
+    dev:pair(function(confirmed, reason)
         UIManager:close(msg)
-        if confirmed then
+        local refused = pairRefusedText(reason)
+        if refused then
+            UIManager:show(InfoMessage:new{ text = refused, timeout = 3 })
+        elseif confirmed then
             UIManager:show(InfoMessage:new{
                 text = _("Paired with ") .. displayName(dev),
                 timeout = 2,

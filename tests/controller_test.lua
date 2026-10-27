@@ -521,7 +521,7 @@ end
 do
     local Devices = require("bluetooth/controller/devices")
     local dev = Devices:new({ mac = "AA:AA", name = "Phone",
-        backend = { pair = function() return false end },
+        backend = { pair = function() return false, "busy" end },
         controller = { enableWhenDisabled = function(_, cb) cb(true) end } })
     local ok, reason
     dev:pair(function(confirmed, why) ok, reason = confirmed, why end)
