@@ -431,13 +431,21 @@ function controller:enable(callback)
     local my_generation = self._poll_generation
     self._enabling_generation = my_generation
     local release = Standby.hold()
+    -- Callers that arrive mid-enable share this outcome rather than start a
+    -- second enable that would supersede this one (decision 2026-10-27).
+    local joiners = {}
+    self._enable_joiners = joiners
     local user_callback = callback
     callback = function(confirmed, reason)
         release()
         if self._enabling_generation == my_generation then
             self._enabling_generation = nil
         end
+        if self._enable_joiners == joiners then
+            self._enable_joiners = nil
+        end
         if user_callback then user_callback(confirmed, reason) end
+        for _, joiner in ipairs(joiners) do joiner(confirmed, reason) end
     end
 
     local function send()
@@ -516,6 +524,13 @@ function controller:toggle(callback)
 end
 
 function controller:enableWhenDisabled(callback)
+    -- Joins an enable in flight, so a tap during the wake restore doesn't
+    -- supersede it (decision 2026-10-27). The running enable holds Standby.
+    if self:isEnabling() and self._enable_joiners then
+        logger.dbg("Bluetooth: enable already in progress, joining it")
+        if callback then table.insert(self._enable_joiners, callback) end
+        return
+    end
     self:status()
     if not self.is_enabled then
         return self:enable(callback)

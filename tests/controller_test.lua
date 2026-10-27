@@ -516,6 +516,80 @@ do
     check(by_enable == true, "superseded by an enable: still wants on")
 end
 
+-- A tap during a restore's enable joins it instead of starting a second
+-- enable, which used to supersede the restore and skip its reconnect
+-- (decision 2026-10-27).
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local on = false
+    local c, calls = build(false)
+    fake.status = function() return on end
+    local a, b = {}, {}
+    c:enableWhenDisabled(function(ok) table.insert(a, ok) end)
+    table.remove(queue, 1)() -- debounce fires, enable sent, radio still off
+    c:enableWhenDisabled(function(ok) table.insert(b, ok) end)
+    on = true
+    drain()
+    check(#a == 1 and a[1] == true, "join: first caller confirmed once, got " .. #a .. " " .. tostring(a[1]))
+    check(#b == 1 and b[1] == true, "join: joiner confirmed once, got " .. #b .. " " .. tostring(b[1]))
+    check(calls.enable == 1, "join: one enable sent, got " .. tostring(calls.enable))
+    check(holds == 0, "join: no standby hold left, got " .. holds)
+end
+
+-- A disable supersedes the enable for its joiners too.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local c = build(false)
+    local a, b = {}, {}
+    c:enableWhenDisabled(function(ok, why) table.insert(a, tostring(ok) .. ":" .. tostring(why)) end)
+    c:enableWhenDisabled(function(ok, why) table.insert(b, tostring(ok) .. ":" .. tostring(why)) end)
+    c:disable()
+    drain()
+    check(#a == 1 and a[1] == "false:superseded", "join disabled: first caller superseded once, got " .. table.concat(a, ","))
+    check(#b == 1 and b[1] == "false:superseded", "join disabled: joiner superseded once, got " .. table.concat(b, ","))
+    check(holds == 0, "join disabled: no standby hold left, got " .. holds)
+end
+
+-- The other way round: a tap starts the enable and the restore joins it.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local on = false
+    local c, calls = build(false)
+    fake.status = function() return on end
+    fake.enable = function() calls.enable = (calls.enable or 0) + 1; on = true end
+    local tap, restore = {}, {}
+    c:enableWhenDisabled(function(ok) table.insert(tap, ok) end)
+    c:enableWhenDisabled(function(ok) table.insert(restore, ok) end)
+    drain()
+    check(#tap == 1 and tap[1] == true, "join reversed: tap confirmed once, got " .. #tap .. " " .. tostring(tap[1]))
+    check(#restore == 1 and restore[1] == true, "join reversed: restore confirmed once, got " .. #restore .. " " .. tostring(restore[1]))
+    check(calls.enable == 1, "join reversed: one enable sent, got " .. tostring(calls.enable))
+    check(holds == 0, "join reversed: no standby hold left, got " .. holds)
+end
+
+-- A joiner that asks again from its callback finds the radio on and starts
+-- nothing new.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local on = false
+    local c, calls = build(false)
+    fake.status = function() return on end
+    fake.enable = function() calls.enable = (calls.enable or 0) + 1; on = true end
+    local again = {}
+    c:enableWhenDisabled(function() end)
+    c:enableWhenDisabled(function()
+        c:enableWhenDisabled(function(ok) table.insert(again, ok) end)
+    end)
+    drain()
+    check(#again == 1 and again[1] == true, "join again: confirmed once, got " .. #again .. " " .. tostring(again[1]))
+    check(calls.enable == 1, "join again: no second enable, got " .. tostring(calls.enable))
+    check(holds == 0, "join again: no standby hold left, got " .. holds)
+end
+
 -- Only the user's own switch blocks the menu, and it still does on the
 -- controller built after a view change.
 do
