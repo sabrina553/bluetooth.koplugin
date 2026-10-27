@@ -81,8 +81,12 @@ end
 function Bluetooth:restoreBluetoothState(allow_enable)
 
     local function notEnabled(reason)
-        if reason == "superseded" then
-            logger.dbg("Bluetooth.koplugin: enable replaced by a newer on/off (suspend?), skipping reconnect")
+        -- Only a disable (suspend) is expected here; a newer enable, from a
+        -- tap during the wake, skips the reconnect and should say so.
+        if reason == "superseded" and not self.controller:wantsEnabled() then
+            logger.dbg("Bluetooth.koplugin: enable replaced by a disable (suspend), skipping reconnect")
+        elseif reason == "superseded" then
+            logger.warn("Bluetooth.koplugin: enable replaced by a newer enable, skipping reconnect")
         else
             logger.warn("Bluetooth.koplugin: could not confirm bluetooth enabled, skipping reconnect")
         end

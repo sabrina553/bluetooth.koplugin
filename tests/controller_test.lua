@@ -501,6 +501,21 @@ do
     check(ok == false and reason == "superseded", "superseded enable: reports why, got " .. tostring(reason))
 end
 
+-- main.lua tells the two apart by wantsEnabled() when the callback fires.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    local c = build(false)
+    local by_disable, by_enable
+    c:enable(function() by_disable = c:wantsEnabled() end)
+    c:disable()
+    drain()
+    c:enable(function() by_enable = c:wantsEnabled() end)
+    c:enable()
+    drain()
+    check(by_disable == false, "superseded by a disable: no longer wants on")
+    check(by_enable == true, "superseded by an enable: still wants on")
+end
+
 -- Only the user's own switch blocks the menu, and it still does on the
 -- controller built after a view change.
 do
