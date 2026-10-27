@@ -222,6 +222,32 @@ do
     check("pair: fed default agent, pair, quit in order",
         text:find("default%-agent\npair 00:11:22:33:44:55\nPairing successful\nquit\n@@done") ~= nil, true)
     check("pair: session ends once it has a result, took " .. took .. "s", took <= 4, true)
+
+    -- A failure ends the session early too, and silence ends it once the
+    -- feeder's count runs out, with quit sent.
+    local function session(reply, session_s)
+        Bluez.PAIR_SESSION_S = session_s
+        local path = os.tmpname()
+        local stand_in = "awk '{print; fflush()} " .. (reply and ('/^pair /{print \"' .. reply .. '\"; fflush()} ') or "")
+            .. "/^quit/{exit}'"
+        local t0 = os.time()
+        -- An outer timeout, so a feeder that never counts fails instead of hanging.
+        local script = os.tmpname()
+        local sh = io.open(script, "w")
+        sh:write((Bluez.pairCommand("00:11:22:33:44:55", path):gsub("bluetoothctl %-%-agent NoInputNoOutput", stand_in)))
+        sh:close()
+        os.execute("timeout 10 sh " .. script)
+        os.remove(script)
+        local fh = io.open(path, "r"); local got = fh and fh:read("*a") or ""; if fh then fh:close() end
+        os.remove(path)
+        return got, os.time() - t0
+    end
+    local failed, failed_took = session("Failed to pair: org.bluez.Error.AuthenticationFailed", 20)
+    check("pair: a failure is reported", Bluez.pairResult(failed), false)
+    check("pair: a failure ends the session early, took " .. failed_took .. "s", failed_took <= 4, true)
+    local silent, silent_took = session(nil, 2)
+    check("pair: silence still sends quit", silent:find("\nquit\n@@done", 1, true) ~= nil, true)
+    check("pair: silence ends after the session, took " .. silent_took .. "s", silent_took >= 2 and silent_took <= 5, true)
     Bluez.timeout_style, Bluez.PAIR_SESSION_S = saved_style, saved_s
 end
 
