@@ -350,6 +350,23 @@ do
     os.execute, UIManager.scheduleIn, Bluez.pair_session = real_execute, saved_schedule, nil
 end
 
+-- A refused pair costs nothing: no shell-out and no temp file.
+do
+    local real_execute, real_popen, real_tmpname = os.execute, io.popen, os.tmpname
+    local shells, tmpnames = 0, 0
+    os.execute = function() shells = shells + 1 return 0 end
+    io.popen = function() shells = shells + 1 return nil end
+    os.tmpname = function() tmpnames = tmpnames + 1 return real_tmpname() end
+    Bluez.pair_session = {}
+
+    check("pair: busy is refused", select(2, Bluez:pair("00:11:22:33:44:55")), "busy")
+    check("pair: not a MAC while busy is still invalid", select(2, Bluez:pair("nope")), "invalid")
+    check("pair: refusals run no shell", shells, 0)
+    check("pair: refusals make no temp file", tmpnames, 0)
+
+    os.execute, io.popen, os.tmpname, Bluez.pair_session = real_execute, real_popen, real_tmpname, nil
+end
+
 -- runAsync counts ticks, not os.time: a suspend jumps the clock by hours
 -- between two ticks while the timer and the command stood still.
 do
