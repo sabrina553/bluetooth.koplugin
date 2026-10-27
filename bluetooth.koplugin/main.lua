@@ -81,8 +81,8 @@ end
 function Bluetooth:restoreBluetoothState(allow_enable)
 
     local function notEnabled(reason)
-        -- Only a disable (suspend) is expected here; a newer enable, from a
-        -- tap during the wake, skips the reconnect and should say so.
+        -- Only a disable (suspend) is expected here. A tap mid-enable now joins
+        -- it (decision 2026-10-27), so the newer-enable WARN is a tripwire.
         if reason == "superseded" and not self.controller:wantsEnabled() then
             logger.dbg("Bluetooth.koplugin: enable replaced by a disable (suspend), skipping reconnect")
         elseif reason == "superseded" then
