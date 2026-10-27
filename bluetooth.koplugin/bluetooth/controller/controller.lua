@@ -32,6 +32,16 @@ end
 ---@return controller
 local controller = {}
 
+-- Radio-switch state is module level, like user_switching: main.lua builds a
+-- new controller on every view change while the old one's poll still runs
+-- (decision 2026-10-27).
+local switch = {}
+
+--- Test-only: clears the shared switch state so each test starts idle.
+function controller._resetSwitchState()
+    switch = {}
+end
+
 function controller:new(o)
     o = o or {}
     setmetatable(o, self)
@@ -285,11 +295,11 @@ local ENABLE_DISABLE_DEBOUNCE_S = 0.15
 --- forever after a suspend/resume.
 ---@param generation integer the poll generation this call belongs to, captured
 ---  by enable()/disable() at the moment they started polling. If a newer
----  enable()/disable() call has since bumped self._poll_generation, this
----  loop has been superseded and should stop quietly rather than keep
+---  enable()/disable() call, on any instance, has since bumped
+---  switch.poll_generation, this loop has been superseded and should stop quietly rather than keep
 ---  polling and firing its own (now-stale) callback alongside the new one.
 local function pollField(self, field, expected, callback, attempt, generation)
-    if generation ~= self._poll_generation then
+    if generation ~= switch.poll_generation then
         logger.dbg("Bluetooth: pollField for " .. field .. " superseded by a newer enable/disable call, stopping")
         if callback then callback(false, "superseded") end
         return
@@ -304,7 +314,7 @@ local function pollField(self, field, expected, callback, attempt, generation)
 
     -- self:status() can itself take a moment on some backends; re-check
     -- here too in case a newer enable/disable call landed while it ran.
-    if generation ~= self._poll_generation then
+    if generation ~= switch.poll_generation then
         logger.dbg("Bluetooth: pollField for " .. field .. " superseded by a newer enable/disable call, stopping")
         if callback then callback(false, "superseded") end
         return
@@ -351,14 +361,14 @@ function controller:statusCached(on_change)
     if on_change then table.insert(self._status_listeners, on_change) end
     if not self._status_reading then
         self._status_reading = true
-        local seq, generation = self._status_seq, self._poll_generation
+        local seq, generation = self._status_seq, switch.poll_generation
         self.backend:readStatus(function(enabled)
             self._status_reading = false
             local listeners = self._status_listeners
             self._status_listeners = {}
-            if enabled == nil or seq ~= self._status_seq or generation ~= self._poll_generation then
+            if enabled == nil or seq ~= self._status_seq or generation ~= switch.poll_generation then
                 logger.dbg(string.format("Bluetooth: background status dropped (answer %s, newer check %s, radio changed %s)",
-                    tostring(enabled), tostring(seq ~= self._status_seq), tostring(generation ~= self._poll_generation)))
+                    tostring(enabled), tostring(seq ~= self._status_seq), tostring(generation ~= switch.poll_generation)))
                 return
             end
             logger.dbg("Bluetooth: background status says " .. (enabled and "on" or "off") ..
@@ -378,14 +388,14 @@ end
 --- nothing should talk to bluetoothd. Resume 1s after suspend hit this on
 --- 2026-10-13: a device read ran mid-shutdown and KOReader stopped logging.
 function controller:isDisabling()
-    return self._disabling_generation ~= nil
-        and self._disabling_generation == self._poll_generation
+    return switch.disabling_generation ~= nil
+        and switch.disabling_generation == switch.poll_generation
 end
 
 --- True while an enable() has been called and not yet confirmed or superseded.
 function controller:isEnabling()
-    return self._enabling_generation ~= nil
-        and self._enabling_generation == self._poll_generation
+    return switch.enabling_generation ~= nil
+        and switch.enabling_generation == switch.poll_generation
 end
 
 --- What the radio is heading towards, as opposed to what it reads right now.
@@ -401,7 +411,7 @@ end
 -- radio to report off, or it races the shutdown. Gives up after the same
 -- budget as pollField and sends anyway, since a stuck radio is worse.
 local function waitForOff(self, generation, send, callback, attempt)
-    if generation ~= self._poll_generation then
+    if generation ~= switch.poll_generation then
         if callback then callback(false, "superseded") end
         return
     end
@@ -411,7 +421,7 @@ local function waitForOff(self, generation, send, callback, attempt)
         if self.is_enabled then
             logger.warn("Bluetooth: radio still on after disable, enabling anyway")
         end
-        self._disable_sent = false
+        switch.disable_sent = false
         return send()
     end
     UIManager:scheduleIn(Poll.delay(attempt), function()
@@ -427,22 +437,22 @@ function controller:enable(callback)
     -- call (e.g. suspend immediately followed by resume). Without this,
     -- both could end up issuing os.execute('netagent bt on/off') and
     -- polling status() concurrently against the same underlying radio.
-    self._poll_generation = (self._poll_generation or 0) + 1
-    local my_generation = self._poll_generation
-    self._enabling_generation = my_generation
+    switch.poll_generation = (switch.poll_generation or 0) + 1
+    local my_generation = switch.poll_generation
+    switch.enabling_generation = my_generation
     local release = Standby.hold()
     -- Callers that arrive mid-enable share this outcome rather than start a
     -- second enable that would supersede this one (decision 2026-10-27).
     local joiners = {}
-    self._enable_joiners = joiners
+    switch.enable_joiners = joiners
     local user_callback = callback
     callback = function(confirmed, reason)
         release()
-        if self._enabling_generation == my_generation then
-            self._enabling_generation = nil
+        if switch.enabling_generation == my_generation then
+            switch.enabling_generation = nil
         end
-        if self._enable_joiners == joiners then
-            self._enable_joiners = nil
+        if switch.enable_joiners == joiners then
+            switch.enable_joiners = nil
         end
         if user_callback then user_callback(confirmed, reason) end
         for _, joiner in ipairs(joiners) do joiner(confirmed, reason) end
@@ -454,12 +464,12 @@ function controller:enable(callback)
     end
 
     UIManager:scheduleIn(ENABLE_DISABLE_DEBOUNCE_S, function()
-        if my_generation ~= self._poll_generation then
+        if my_generation ~= switch.poll_generation then
             logger.dbg("Bluetooth: enable() superseded before its command was sent, skipping")
             if callback then callback(false, "superseded") end
             return
         end
-        if self._disable_sent then
+        if switch.disable_sent then
             return waitForOff(self, my_generation, send, callback)
         end
         send()
@@ -468,35 +478,35 @@ end
 
 function controller:disable(callback)
     logger.dbg("Disabling Bluetooth Controller")
-    self._poll_generation = (self._poll_generation or 0) + 1
-    local my_generation = self._poll_generation
-    self._disabling_generation = my_generation
+    switch.poll_generation = (switch.poll_generation or 0) + 1
+    local my_generation = switch.poll_generation
+    switch.disabling_generation = my_generation
     local release = Standby.hold()
 
     local function done(confirmed)
         release()
-        if self._disabling_generation == my_generation then
-            self._disabling_generation = nil
+        if switch.disabling_generation == my_generation then
+            switch.disabling_generation = nil
         end
         if callback then callback(confirmed) end
     end
 
     UIManager:scheduleIn(ENABLE_DISABLE_DEBOUNCE_S, function()
-        if my_generation ~= self._poll_generation then
+        if my_generation ~= switch.poll_generation then
             logger.dbg("Bluetooth: disable() superseded before its command was sent, skipping")
             return done(false)
         end
         self:callDeviceFunction("disable")
-        self._disable_sent = true
+        switch.disable_sent = true
         pollField(self, "is_enabled", false, function(confirmed)
-            if confirmed then self._disable_sent = false end
+            if confirmed then switch.disable_sent = false end
             done(confirmed)
         end, nil, my_generation)
     end)
 end
 
--- Module level, not per instance: main.lua builds a new controller on every
--- view change while the old one's poll finishes the switch.
+-- Module level, not per instance, like switch above: main.lua builds a new
+-- controller on every view change while the old one's poll finishes the switch.
 local user_switching = false
 
 --- True while a switch the user started with toggle() is under way. Restores,
@@ -526,9 +536,9 @@ end
 function controller:enableWhenDisabled(callback)
     -- Joins an enable in flight, so a tap during the wake restore doesn't
     -- supersede it (decision 2026-10-27). The running enable holds Standby.
-    if self:isEnabling() and self._enable_joiners then
+    if self:isEnabling() and switch.enable_joiners then
         logger.dbg("Bluetooth: enable already in progress, joining it")
-        if callback then table.insert(self._enable_joiners, callback) end
+        if callback then table.insert(switch.enable_joiners, callback) end
         return
     end
     self:status()
@@ -678,13 +688,13 @@ function controller:knownDevices(callback, opts)
             return self.known_devices or {}
         end
         self._reading = true
-        local generation = self._poll_generation
+        local generation = switch.poll_generation
         local started = now()
         self.backend:readSnapshot(function(live)
             self._reading = false
             local waiters = self._read_waiters
             self._read_waiters = {}
-            local fresh = generation == self._poll_generation
+            local fresh = generation == switch.poll_generation
             if fresh then
                 logger.dbg(string.format("Bluetooth: background read took %.2fs", now() - started))
                 self:applyRead(live)

@@ -50,6 +50,8 @@ end
 -- Builds a controller on the PocketBook backend with a fake radio. The
 -- backend table the controller picked is replaced wholesale.
 local function build(radio_on, store_data)
+    -- The switch state is shared across instances, so each build starts idle.
+    controller._resetSwitchState()
     local calls = {}
     fake.status = function() return radio_on end
     fake.enable = function() calls.enable = (calls.enable or 0) + 1 end
@@ -292,7 +294,7 @@ do
     local before = c.known_devices
     local dropped = {}
     c:knownDevices(function(ok) table.insert(dropped, ok) end)
-    c._poll_generation = (c._poll_generation or 0) + 1
+    c:enable() -- bumps the shared poll generation, as a real switch would
     finish({ dev("ZZ:ZZ") })
     check(c.known_devices == before, "async: stale result not applied")
     check(#dropped == 1 and dropped[1] == false, "async: stale callback fires once with false")
@@ -347,7 +349,7 @@ do
     check(c.is_enabled == after, "cached status: stale result dropped after a blocking check")
 
     c:statusCached(on_change)
-    c._poll_generation = (c._poll_generation or 0) + 1
+    c:enable() -- bumps the shared poll generation, as a real switch would
     finish(not c.is_enabled)
     check(c.is_enabled == after, "cached status: result dropped after enable/disable")
 
@@ -745,6 +747,69 @@ do
     check(table.concat(got, ",") == "false:superseded", "wait superseded: got " .. table.concat(got, ","))
     check(table.concat(order, ",") == "off,off", "wait superseded: on never sent, got " .. table.concat(order, ","))
     check(holds == 0, "wait superseded: holds balanced, got " .. holds)
+end
+
+-- main.lua builds a new controller on every view change, so the switch state
+-- is shared: B joins, supersedes and reports A's switch (decision 2026-10-27).
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local on = false
+    local A = build(false)
+    local B = build(false)
+    fake.status = function() return on end
+    local enables = 0
+    fake.enable = function() enables = enables + 1 end
+    local a, b = {}, {}
+    A:enableWhenDisabled(function(ok) table.insert(a, ok) end)
+    table.remove(queue, 1)() -- debounce fires, enable sent, radio still off
+    check(B:isEnabling() == true, "shared: B sees A's enable in progress")
+    B:enableWhenDisabled(function(ok) table.insert(b, ok) end)
+    on = true
+    drain()
+    check(enables == 1, "shared: one enable sent, got " .. enables)
+    check(#a == 1 and a[1] == true, "shared: A confirmed once, got " .. #a .. " " .. tostring(a[1]))
+    check(#b == 1 and b[1] == true, "shared: B joined and confirmed once, got " .. #b .. " " .. tostring(b[1]))
+    check(holds == 0, "shared: no standby hold left, got " .. holds)
+end
+
+-- A suspend disable() on the new instance supersedes the old one's enable.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local A = build(false)
+    local B = build(false)
+    local got = {}
+    A:enableWhenDisabled(function(ok, why) table.insert(got, tostring(ok) .. ":" .. tostring(why)) end)
+    B:disable()
+    drain()
+    check(table.concat(got, ",") == "false:superseded", "shared disable: A superseded once, got " .. table.concat(got, ","))
+    check(holds == 0, "shared disable: holds balanced, got " .. holds)
+end
+
+-- A disable sent by the old instance makes the new one's enable wait for the
+-- radio to report off, or "on" races the shutdown (decision 2026-10-27).
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local on, order = true, {}
+    local A = build(true)
+    local B = build(true)
+    fake.status = function() return on end
+    fake.disable = function() table.insert(order, "off") end
+    fake.enable = function() table.insert(order, "on"); on = true end
+    A:disable()
+    table.remove(queue, 1)() -- A's debounce: off sent, radio still reads on
+    local got = {}
+    B:enable(function(ok) table.insert(got, ok) end)
+    table.remove(queue, 1)() -- A's stale poll ends
+    table.remove(queue, 1)() -- B's debounce: must wait for off, not send on
+    check(table.concat(order, ",") == "off", "shared disable sent: B waits for off, got " .. table.concat(order, ","))
+    on = false
+    drain()
+    check(table.concat(order, ",") == "off,on", "shared disable sent: on after off, got " .. table.concat(order, ","))
+    check(#got == 1 and got[1] == true, "shared disable sent: B confirmed once, got " .. #got .. " " .. tostring(got[1]))
+    check(holds == 0, "shared disable sent: holds balanced, got " .. holds)
 end
 
 if failures > 0 then os.exit(1) end
