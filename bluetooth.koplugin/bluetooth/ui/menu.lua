@@ -197,8 +197,8 @@ function BluetoothMenu:buildMenuTable()
                     return
                 end
                 local msg
-                -- The tick may come from the cache; toggle() re-checks, so
-                -- check first or the message and the action disagree.
+                -- The tick may come from the cache, so read first or the
+                -- message and the action disagree; toggle() reuses this read.
                 self.controller:status()
                 if self.controller:wantsEnabled() then
                     msg = InfoMessage:new{ text = _("Disabling Bluetooth") }
@@ -225,7 +225,7 @@ function BluetoothMenu:buildMenuTable()
                         })
                     end
                     self:refresh(touchmenu_instance)
-                end)
+                end, true)
             end,
             checked_func = function()
                 return self.controller.is_enabled
