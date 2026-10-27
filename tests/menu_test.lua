@@ -217,8 +217,7 @@ do
     shown = {}
     local toggles = 0
     local switching = true
-    menu.controller.isEnabling = function() return switching end
-    menu.controller.isDisabling = function() return false end
+    menu.controller.isUserSwitching = function() return switching end
     menu.controller.status = function() end
     menu.controller.wantsEnabled = function() return true end
     menu.controller.toggle = function() toggles = toggles + 1 end

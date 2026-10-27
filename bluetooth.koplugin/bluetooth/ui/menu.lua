@@ -182,8 +182,8 @@ function BluetoothMenu:buildMenuTable()
             callback = function(touchmenu_instance)
                 -- The PocketBook radio takes about 5 s to switch and looks
                 -- hung, so people tap again; each tap used to flip it back.
-                -- Ignored quietly while a switch is under way 
-                if self.controller:isEnabling() or self.controller:isDisabling() then
+                -- Ignored quietly while that switch is under way.
+                if self.controller:isUserSwitching() then
                     logger.dbg("Bluetooth: radio is still switching, ignoring the tap")
                     return
                 end

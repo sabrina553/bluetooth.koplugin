@@ -487,16 +487,31 @@ function controller:disable(callback)
     end)
 end
 
+-- Module level, not per instance: main.lua builds a new controller on every
+-- view change while the old one's poll finishes the switch.
+local user_switching = false
+
+--- True while a switch the user started with toggle() is under way. Restores,
+--- connects and suspends switch the radio too, but must not block the menu.
+function controller:isUserSwitching()
+    return user_switching
+end
+
 --- The user's own switch: its intent is saved as the state to restore at a
 --- cold start. disable() alone is not, since disable-on-suspend uses it.
 function controller:toggle(callback)
     self:status()
     local turn_on = not self:wantsEnabled()
     if self.settings then self.settings:setRadioWasOn(turn_on) end
+    user_switching = true
+    local function done(...)
+        user_switching = false
+        if callback then callback(...) end
+    end
     if turn_on then
-        return self:enable(callback)
+        return self:enable(done)
     else
-        return self:disable(callback)
+        return self:disable(done)
     end
 end
 

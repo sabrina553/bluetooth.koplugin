@@ -501,6 +501,21 @@ do
     check(ok == false and reason == "superseded", "superseded enable: reports why, got " .. tostring(reason))
 end
 
+-- Only the user's own switch blocks the menu, and it still does on the
+-- controller built after a view change.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    local c = build(false)
+    c:enable()
+    check(not c:isUserSwitching(), "user switch: a restore's enable doesn't count")
+    drain()
+    c:toggle()
+    local after_view_change = build(true)
+    check(after_view_change:isUserSwitching(), "user switch: seen by a new instance")
+    drain()
+    check(not c:isUserSwitching(), "user switch: cleared once confirmed")
+end
+
 -- Pairing while another session runs: the menu is told "busy", not a
 -- failed pairing.
 do
