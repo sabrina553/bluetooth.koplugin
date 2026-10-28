@@ -10,7 +10,7 @@ local UIManager = require("ui/uimanager")
 -- KOReader skips a plugin whose main.lua returns { disabled = true }
 -- (frontend/pluginloader.lua), so there are no menu entries or popups.
 if not BackendSelect.select(Device) then
-    logger.info("Bluetooth.koplugin: no backend for this device, not loading")
+    logger.info("Bluetooth.koplugin: no backend for this device, not loading; family:", tostring(BackendSelect.family(Device)))
     return { disabled = true }
 end
 

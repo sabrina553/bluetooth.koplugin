@@ -38,6 +38,9 @@ local Parse = require("bluetooth/controller/bluetoothctl_parse")
 
 local bluez = {}
 
+-- See backend_contract.lua; BluezDbus inherits this through __index.
+bluez.capabilities = { trust = true, block = true, transport = true, info = true }
+
 -- bluetoothctl and netagent write progress to stdout/stderr, which KOReader
 -- inherits and logs, so background commands are silenced. Output is only
 -- captured where we actually parse it.

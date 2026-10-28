@@ -812,5 +812,15 @@ do
     check(holds == 0, "shared disable sent: holds balanced, got " .. holds)
 end
 
+
+do -- Capabilities (decision 2026-10-28): the menu asks the controller.
+    local c = setmetatable({ backend = { capabilities = { trust = true, block = false } } }, { __index = controller })
+    check(c:can("trust") == true, "can: declared feature is true")
+    check(c:can("block") == false, "can: switched-off feature is false")
+    check(c:can("foo") == false, "can: unknown feature is false")
+    c.backend = nil
+    check(c:can("trust") == false, "can: no backend is false, not an error")
+end
+
 if failures > 0 then os.exit(1) end
 print("controller_test: ok")
