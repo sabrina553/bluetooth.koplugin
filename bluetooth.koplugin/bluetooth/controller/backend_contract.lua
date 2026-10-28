@@ -23,6 +23,9 @@ Contract.FEATURES = {
     block = { "block", "unblock" },
     transport = {},
     info = { "info" },
+    -- Pairing a device typed in by address, for remotes Kindle's audio-only
+    -- scan never lists (decision 2026-10-28).
+    address_pair = {},
 }
 
 ---@param backend table

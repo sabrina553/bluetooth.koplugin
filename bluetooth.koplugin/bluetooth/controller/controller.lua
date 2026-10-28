@@ -9,6 +9,7 @@ local PocketBook = require("bluetooth/controller/pocketbook")
 local Bluez = require("bluetooth/controller/bluez")
 local BluezDbus = require("bluetooth/controller/bluez_dbus")
 local KoboMTK = require("bluetooth/controller/kobo_mtk")
+local Kindle = require("bluetooth/controller/kindle")
 local Dbus = require("bluetooth/controller/dbus")
 local Standby = require("bluetooth/standby")
 local Poll = require("bluetooth/controller/poll")
@@ -61,6 +62,7 @@ local backends = {
     Bluez = Bluez:new(),
     BluezDbus = BluezDbus:new(),
     KoboMTK = KoboMTK:new(),
+    Kindle = Kindle:new(),
 }
 
 function controller:init()
@@ -93,8 +95,8 @@ function controller:applyMode(reset)
     if reset then BluezDbus.reset() end
     local setting = self.settings and self.settings.getBackendMode and self.settings:getBackendMode() or "auto"
     self.mode = BackendSelect.mode(setting, Dbus.available())
-    if self.type == "KoboMTK" then
-        -- D-Bus only; the shared setting may still say Compatible.
+    if self.type == "KoboMTK" or self.type == "Kindle" then
+        -- No Compatible mode here; the shared setting may still say so.
         self.mode = "fast"
     end
     local transport = self.mode == "fast" and BluezDbus or Bluez
@@ -124,6 +126,14 @@ end
 function controller:can(feature)
     local caps = self.backend and self.backend.capabilities
     return caps ~= nil and caps[feature] == true
+end
+
+--- Advice to show after a failed pairing, or nil: Kindle needs a one-time
+--- setup for remotes (decision 2026-10-28).
+---@return string|nil
+function controller:pairFailedHint()
+    local backend = self.backend
+    return backend and backend.pairFailedHint and backend:pairFailedHint() or nil
 end
 
 function controller:Devicetype()

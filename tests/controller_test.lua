@@ -823,17 +823,30 @@ do -- Capabilities (decision 2026-10-28): the menu asks the controller.
 end
 
 
-do -- Kobo MTK keeps its backend whatever the mode setting (decision 2026-10-28).
-    local KoboMTK = require("bluetooth/controller/kobo_mtk")
-    local kobo = KoboMTK:new()
+do -- Kobo MTK and Kindle keep their backend whatever the mode setting (decision 2026-10-28).
+    local Kindle = require("bluetooth/controller/kindle")
+    Kindle.isPrepared = function() return false end
+    for _, case in ipairs({ { "KoboMTK", require("bluetooth/controller/kobo_mtk"):new() }, { "Kindle", Kindle:new() } }) do
+    local kobo = case[2]
     for _, setting in ipairs({ "auto", "fast", "compatible" }) do
-        local c = setmetatable({ type = "KoboMTK", backend = kobo,
+        local c = setmetatable({ type = case[1], backend = kobo,
             settings = { getBackendMode = function() return setting end } }, { __index = controller })
         c:applyMode()
         check(c.backend == kobo, "Kobo MTK keeps its backend with setting " .. setting)
         check(c:can("transport") == false, "Kobo MTK hides the mode choice")
-        check(c:activeMode() == "fast", "Kobo MTK is always fast, setting " .. setting)
+        check(c:activeMode() == "fast", case[1] .. " is always fast, setting " .. setting)
     end
+    end
+end
+
+
+do -- pairFailedHint: the backend's advice after a failed pairing (decision 2026-10-28).
+    local c = setmetatable({ backend = nil }, { __index = controller })
+    check(c:pairFailedHint() == nil, "hint: none without a backend")
+    c.backend = {}
+    check(c:pairFailedHint() == nil, "hint: none when the backend has no hint")
+    c.backend = { pairFailedHint = function() return "set up first" end }
+    check(c:pairFailedHint() == "set up first", "hint: the backend's text")
 end
 
 if failures > 0 then os.exit(1) end
