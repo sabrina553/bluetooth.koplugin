@@ -520,8 +520,31 @@ function BluetoothMenu:pairedDevices(menu, knownDevices)
     end
 end
 
+--- Drops items for features the backend cannot do (decision 2026-10-28,
+--- vault Docs/Multi-device phase 0 design): each item is either a table or
+--- `false` from ifCan, and a list must not hold holes for ipairs.
+---@param feature string
+---@param item table
+---@return table|false
+function BluetoothMenu:ifCan(feature, item)
+    return self.controller:can(feature) and item
+end
+
+---@param items table
+---@param separator boolean|nil mark the last kept item, as the row's last
+---  button carried the separator before items could be dropped
+---@return table items without the `false` entries
+local function compact(items, separator)
+    local out = {}
+    for i = 1, table.maxn(items) do
+        if items[i] then table.insert(out, items[i]) end
+    end
+    if separator and #out > 0 then out[#out].separator = true end
+    return out
+end
+
 function BluetoothMenu:getSettingsMenu()
-     return {
+     return compact({
         {
             text = _("Disable on Suspend"),
             checked_func = function()
@@ -557,14 +580,14 @@ function BluetoothMenu:getSettingsMenu()
             keep_menu_open = true,
             separator = true,
         },
-        {
+        self:ifCan("transport", {
             text_func = function()
                 local names = { fast = _("Fast"), compatible = _("Compatible") }
                 return T(_("Backend: %1"), names[self.controller:activeMode()])
             end,
             sub_item_table = self:getBackendModeMenu(),
-        },
-        {
+        }),
+        self:ifCan("transport", {
             text = _("Live updates (experimental)"),
             help_text = _("While this menu is open in Fast mode, update it as soon as a device changes instead of every 3 seconds."),
             enabled_func = function()
@@ -579,12 +602,12 @@ function BluetoothMenu:getSettingsMenu()
             end,
             keep_menu_open = true,
             separator = true,
-        },
+        }),
         {
             text = _("About"),
             sub_item_table = self:getAboutMenu(),
         },
-    }
+    })
 end
 
 --- Fast reads over D-Bus, Compatible uses bluetoothctl only; see vault
@@ -782,7 +805,7 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
     dialog = ButtonDialogTitle:new{
         title = dev.name,
         buttons = {
-            {
+            compact({
                 {
                     text = "info",
                     callback = function()
@@ -808,23 +831,21 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
                         self:performToggle(dev, TOGGLE_ACTIONS.pair, touchmenu_instance)
                     end,
                 },
-                {
+                self:ifCan("trust", {
                     text = dev.trusted and _("Untrust") or _("Trust"),
                     callback = function()
                         UIManager:close(dialog)
                         self:performToggle(dev, TOGGLE_ACTIONS.trust, touchmenu_instance)
                     end,
-                },
-                {
+                }),
+                self:ifCan("block", {
                     text = dev.blocked and _("Unblock") or _("Block"),
                     callback = function()
                         UIManager:close(dialog)
                         self:performToggle(dev, TOGGLE_ACTIONS.block, touchmenu_instance)
                     end,
-                    separator = true,
-                },
-
-            },
+                }),
+            }, true),
             {
                 {
                     text = dev.starred and _("Unstar") or _("Star"),

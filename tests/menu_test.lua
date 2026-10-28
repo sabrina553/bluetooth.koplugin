@@ -50,10 +50,12 @@ end
 local function last() return shown[#shown] or {} end
 
 local live = false
+local cannot = {} -- features the stub backend lacks
 local mode = "fast"
 local menu = BluetoothMenu:new({
     settings = { getLiveUpdates = function() return live end },
-    controller = { activeMode = function() return mode end, is_enabled = true, known_devices = {} },
+    controller = { activeMode = function() return mode end, is_enabled = true, known_devices = {},
+        can = function(_, feature) return not cannot[feature] end },
 })
 menu.refresh = function() end
 
@@ -287,6 +289,42 @@ do
     check("buttons: after Settings", item.text, "Buttons")
     check("buttons: opens the KeysMenu", item.sub_item_table_func()[1], "x")
     menu.keys_menu = nil
+end
+
+do -- Capabilities (decision 2026-10-28): items a backend can't do are omitted.
+    local function texts(row)
+        local out = {}
+        for _, b in ipairs(row) do table.insert(out, b.text_func and "Backend" or b.text) end
+        return table.concat(out, ",")
+    end
+    local dev = { name = "Pad", mac = "XX:XX", paired = true }
+    menu:showDeviceActions(dev)
+    check("caps: full row", texts(last().buttons[1]), "info,Unpair,Trust,Block")
+    check("caps: separator on the row's last", last().buttons[1][4].separator, true)
+    cannot = { trust = true, block = true }
+    menu:showDeviceActions(dev)
+    check("caps: no trust or block", texts(last().buttons[1]), "info,Unpair")
+    check("caps: separator moves to the last kept", last().buttons[1][2].separator, true)
+    cannot = { block = true }
+    menu:showDeviceActions(dev)
+    check("caps: trust only", texts(last().buttons[1]), "info,Unpair,Trust")
+
+    local function has(items, label)
+        for _, item in ipairs(items) do
+            if (item.text_func and "Backend" or item.text) == label then return true end
+        end
+        return false
+    end
+    cannot = {}
+    local settings = menu:getSettingsMenu()
+    check("caps: Backend shown", has(settings, "Backend"), true)
+    check("caps: Live updates shown", has(settings, "Live updates (experimental)"), true)
+    cannot = { transport = true }
+    settings = menu:getSettingsMenu()
+    check("caps: Backend hidden", has(settings, "Backend"), false)
+    check("caps: Live updates hidden", has(settings, "Live updates (experimental)"), false)
+    check("caps: About still last", settings[#settings].text, "About")
+    cannot = {}
 end
 
 if failures > 0 then
