@@ -247,6 +247,13 @@ function BluetoothMenu:buildMenuTable()
             separator = true,
         },
     }
+    -- After Settings; only when main.lua passes a KeysMenu (decision 2026-10-28).
+    if self.keys_menu then
+        table.insert(menu, 3, {
+            text = _("Buttons"),
+            sub_item_table_func = function() return self.keys_menu:menuTable() end,
+        })
+    end
     if not self.controller.is_enabled then
         -- Devices below come from the cache; tapping one turns Bluetooth on.
         table.insert(menu, {
