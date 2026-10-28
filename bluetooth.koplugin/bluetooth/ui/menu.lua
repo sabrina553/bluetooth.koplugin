@@ -712,7 +712,10 @@ function BluetoothMenu:pairAddress(text, on_refresh)
     end
     mac = mac:upper()
     local Devices = require("bluetooth/controller/devices")
-    self:pairFoundDevice(Devices:fromScan(mac, mac, self.controller.backend, self.controller), on_refresh)
+    local dev = Devices:fromScan(mac, mac, self.controller.backend, self.controller)
+    -- Nothing to read about it yet, as with unpaired scan results.
+    dev.skip_info = true
+    self:pairFoundDevice(dev, on_refresh)
 end
 
 function BluetoothMenu:showPairByAddress(on_refresh)

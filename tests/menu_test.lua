@@ -364,6 +364,7 @@ do -- Kindle (decision 2026-10-28): setup hint after a failed pairing, pair by a
     check("address pair: says why", last().text, "Not a Bluetooth address")
     menu:pairAddress(" 00:11:22:33:44:aa ")
     check("address pair: valid address paired", paired_with and paired_with.mac, "00:11:22:33:44:AA")
+    check("address pair: no per-device info reads", paired_with and paired_with.skip_info, true)
     menu.pairFoundDevice = saved
 end
 
