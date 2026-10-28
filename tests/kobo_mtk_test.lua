@@ -10,7 +10,14 @@ package.preload["logger"] = function()
 end
 local scheduled = {}
 package.preload["ui/uimanager"] = function()
-    return { scheduleIn = function(_, _, fn) table.insert(scheduled, fn) end }
+    return {
+        scheduleIn = function(_, _, fn) table.insert(scheduled, fn) end,
+        unschedule = function(_, fn)
+            for i = #scheduled, 1, -1 do
+                if scheduled[i] == fn then table.remove(scheduled, i) end
+            end
+        end,
+    }
 end
 local input_opened = {}
 package.preload["device"] = function()
@@ -45,6 +52,8 @@ local calls, scripts, async_reply
 local function fake(answers)
     calls, scripts, logs, scheduled = {}, {}, {}, {}
     KoboMTK.used = false
+    KoboMTK.enabling = false
+    KoboMTK.scan_timer = nil
     BluezDbus.reset()
     Bluez.timeoutPrefix = function(secs) return "timeout " .. secs .. " " end
     Bluez.capture = function(cmd)
@@ -124,6 +133,27 @@ check(on_at and set_at and on_at < set_at, "power: manager On before Powered")
 check(script:find("BluedroidManager1.Off", 1, true) ~= nil, "power: rollback Off in the script")
 check(network.order[2] == "wifi off", "wifi off: switched off again after powering")
 
+-- The quit check reads ownership only, with a short reply timeout.
+fake({ NameHasOwner = TRUE })
+check(kobo:checkUsed() == true, "quit check: owned service counts as used")
+check(#calls == 1 and calls[1]:find("--reply-timeout=1000", 1, true) ~= nil, "quit check: one short read")
+fake({ NameHasOwner = TRUE })
+KoboMTK.used = true
+kobo:checkUsed()
+check(#calls == 0, "quit check: no read once already used")
+
+-- A second tap during the Wi-Fi wait doesn't start a second power-up.
+stubNetwork(false)
+fake()
+kobo:enable()
+kobo:enable()
+check(#network.order == 1, "double enable: Wi-Fi switched on once")
+check(#scheduled == 1, "double enable: one power-up waiting")
+runScheduled()
+check(#scripts == 1, "double enable: one power script")
+kobo:enable()
+check(#scheduled == 1, "double enable: enabling again works once the first finished")
+
 -- Wi-Fi already on: no juggling, and it stays on.
 stubNetwork(true)
 fake()
@@ -153,6 +183,12 @@ kobo:search(7)
 check(ran("StartDiscovery") and not ran("StopDiscovery"), "search: discovery started")
 runScheduled()
 check(ran("StopDiscovery"), "search: discovery stopped when the timer fires")
+
+-- A second scan replaces the first one's stop timer, so it runs its full time.
+fake()
+kobo:search(7)
+kobo:search(7)
+check(#scheduled == 1, "overlapping scans: one stop timer")
 
 -- Pair: Device1.Pair in the background; result reaches on_done.
 local result = "unset"

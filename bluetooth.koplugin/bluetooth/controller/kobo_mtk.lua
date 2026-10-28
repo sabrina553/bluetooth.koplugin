@@ -55,13 +55,28 @@ function KoboMTK:shouldFallBack(err, msg)
     return false
 end
 
+-- Quitting waits on this read, so it gives up sooner than other calls.
+local QUIT_CHECK_TIMEOUT_MS = 1000
+
+--- Whether Kobo's Bluetooth service is running; true, false or nil on error.
+function KoboMTK:serviceOwned(timeout_ms)
+    local owner = DbusParse.property(self.capture(Dbus.commandWithTimeout(timeout_ms or Dbus.REPLY_TIMEOUT_MS,
+        "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.NameHasOwner", "string:" .. self.service)))
+    if owner == true then KoboMTK.used = true end
+    return owner
+end
+
+--- For the reboot-on-exit check: ownership only, no Powered read.
+function KoboMTK:checkUsed()
+    if not KoboMTK.used then self:serviceOwned(QUIT_CHECK_TIMEOUT_MS) end
+    return KoboMTK.used
+end
+
 --- Not owned means Kobo's Bluetooth service isn't running, so the radio is off.
 function KoboMTK:status()
-    local owner = DbusParse.property(self.capture(Dbus.command("org.freedesktop.DBus",
-        "/org/freedesktop/DBus", "org.freedesktop.DBus.NameHasOwner", "string:" .. self.service)))
+    local owner = self:serviceOwned()
     local powered = false
     if owner == true then
-        KoboMTK.used = true
         powered = BluezDbus.status(self)
     end
     local state = tostring(owner) .. "/" .. tostring(powered)
@@ -103,17 +118,25 @@ end
 
 --- Switches Wi-Fi on for the power-up if it was off, then off again
 --- (decision 2026-10-28: silently, no prompt).
+--- A second enable while one is under way is ignored: its Wi-Fi off would
+--- otherwise land in the middle of the other's power-up.
 function KoboMTK:enable()
+    if KoboMTK.enabling then
+        logger.info("KoboMTK: already powering on, ignoring enable")
+        return
+    end
+    KoboMTK.enabling = true
     logger.dbg("KoboMTK: Enabling Bluetooth...")
     local network = self:networkManager()
     if network:isWifiOn() then
-        return self:powerOn()
+        return self:powerOn(function() KoboMTK.enabling = false end)
     end
     logger.info("KoboMTK: Wi-Fi off, switching it on for the power-up")
     network:restoreWifiAsync()
     local UIManager = require("ui/uimanager")
     UIManager:scheduleIn(WIFI_SETTLE_S, function()
         self:powerOn(function()
+            KoboMTK.enabling = false
             logger.info("KoboMTK: switching Wi-Fi off again")
             network:disableWifi(nil, false)
         end)
@@ -129,15 +152,19 @@ function KoboMTK:disable()
 end
 
 --- A one-shot dbus-send keeps discovery running on Kobo's service (unlike
---- bluetoothd), so it is stopped on a timer.
+--- bluetoothd), so it is stopped on a timer. One timer only, as on Kindle:
+--- an earlier scan's timer would cut a newer scan short.
 function KoboMTK:search(duration)
     duration = duration or DEFAULT_SCAN_S
     logger.dbg("KoboMTK: scanning for " .. duration .. "s")
-    self.capture(self:command(self.adapter, "org.bluez.Adapter1.StartDiscovery"))
     local UIManager = require("ui/uimanager")
-    UIManager:scheduleIn(duration, function()
+    if KoboMTK.scan_timer then UIManager:unschedule(KoboMTK.scan_timer) end
+    self.capture(self:command(self.adapter, "org.bluez.Adapter1.StartDiscovery"))
+    KoboMTK.scan_timer = function()
+        KoboMTK.scan_timer = nil
         self.capture(self:command(self.adapter, "org.bluez.Adapter1.StopDiscovery"))
-    end)
+    end
+    UIManager:scheduleIn(duration, KoboMTK.scan_timer)
 end
 
 --- Connects as BluezDbus does, then opens the remote's input device once it

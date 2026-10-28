@@ -43,7 +43,12 @@ function Contract.check(backend)
         table.insert(problems, "no capabilities table")
         return false, problems
     end
-    for feature, on in pairs(caps) do
+    -- Sorted: pairs() order varies, and test output should not.
+    local features = {}
+    for feature in pairs(caps) do table.insert(features, feature) end
+    table.sort(features, function(a, b) return tostring(a) < tostring(b) end)
+    for _, feature in ipairs(features) do
+        local on = caps[feature]
         local methods = Contract.FEATURES[feature]
         if not methods then
             table.insert(problems, "unknown capability " .. tostring(feature))

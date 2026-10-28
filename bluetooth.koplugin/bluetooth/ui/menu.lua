@@ -712,7 +712,10 @@ function BluetoothMenu:pairAddress(text, on_refresh)
     end
     mac = mac:upper()
     local Devices = require("bluetooth/controller/devices")
-    self:pairFoundDevice(Devices:fromScan(mac, mac, self.controller.backend, self.controller), on_refresh)
+    local dev = Devices:fromScan(mac, mac, self.controller.backend, self.controller)
+    -- Nothing to read about it yet, as with unpaired scan results.
+    dev.skip_info = true
+    self:pairFoundDevice(dev, on_refresh)
 end
 
 function BluetoothMenu:showPairByAddress(on_refresh)
@@ -837,9 +840,11 @@ function BluetoothMenu:pairFoundDevice(dev, on_refresh)
         else
             -- Kindle's setup advice stays until tapped (decision 2026-10-28).
             local hint = self.controller:pairFailedHint()
+            local timeout = 2
+            if hint then timeout = nil end
             UIManager:show(InfoMessage:new{
                 text = hint or (_("Could not confirm pairing with ") .. displayName(dev)),
-                timeout = not hint and 2 or nil,
+                timeout = timeout,
             })
         end
         if on_refresh then
@@ -862,9 +867,10 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
                             text = _("Device: ") .. dev.name .. "\n" ..
                                    _("MAC: ") .. dev.mac .. "\n" ..
                                    _("Paired: ") .. tostring(dev.paired) .. "\n" ..
-                                   _("Connected: ") .. tostring(dev.connected) .. "\n" ..
-                                   _("Trusted: ") .. tostring(dev.trusted) .. "\n" ..
-                                   _("Blocked: ") .. tostring(dev.blocked) ..
+                                   _("Connected: ") .. tostring(dev.connected) ..
+                                   -- Kindle can't manage these, so it would show "nil".
+                                   (self.controller:can("trust") and ("\n" .. _("Trusted: ") .. tostring(dev.trusted)) or "") ..
+                                   (self.controller:can("block") and ("\n" .. _("Blocked: ") .. tostring(dev.blocked)) or "") ..
                                    (dev.held and ("\n" .. _("Stays off on wake until you connect it")) or ""),
 
                         }

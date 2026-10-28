@@ -65,6 +65,13 @@ check(Contract.FEATURES.address_pair ~= nil, "address_pair is a known feature")
 b.capabilities.address_pair = true
 check((Contract.check(b)), "address_pair needs no methods")
 
+-- Problems come in name order, so a failing test reads the same every run.
+b = full()
+b.capabilities = { zeta = true, alpha = true, mid = true, beta = true, omega = true }
+ok, problems = Contract.check(b)
+check(table.concat(problems, ";") == "unknown capability alpha;unknown capability beta;unknown capability mid;"
+    .. "unknown capability omega;unknown capability zeta", "problems are sorted by feature: " .. table.concat(problems, ";"))
+
 -- Methods inherited through a metatable count, as BluezDbus inherits Bluez.
 local child = setmetatable({ capabilities = full().capabilities }, { __index = full() })
 check((Contract.check(child)), "inherited methods count")

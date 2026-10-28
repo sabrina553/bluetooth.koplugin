@@ -49,7 +49,13 @@ Kindle.lipc = {
     setInt = function(prop, n)
         return shellOk(("timeout %d lipc-set-prop -i %s %s %d >/dev/null 2>&1"):format(LIPC_TIMEOUT_S, SERVICE, prop, n))
     end,
+    -- Every string property we set is an address, and it goes into a shell
+    -- command unquoted: refuse anything else here, not only in the callers.
     setString = function(prop, s)
+        if not isMac(s) then
+            logger.warn("Kindle: refusing lipc " .. tostring(prop) .. ", not a MAC: " .. Parse.maskMac(tostring(s)))
+            return false
+        end
         return shellOk(("timeout %d lipc-set-prop -s %s %s %s >/dev/null 2>&1"):format(LIPC_TIMEOUT_S, SERVICE, prop, s))
     end,
     readHash = function(prop)

@@ -311,6 +311,11 @@ do -- Capabilities (decision 2026-10-28): items a backend can't do are omitted.
     menu:showDeviceActions(dev)
     check("caps: trust only", texts(last().buttons[1]), "info,Unpair,Trust")
 
+    -- The info box leaves out what the backend can't manage (Kindle showed "nil").
+    last().buttons[1][1].callback()
+    check("caps: info shows Trusted", last().text:find("Trusted:", 1, true) ~= nil, true)
+    check("caps: info leaves out Blocked", last().text:find("Blocked:", 1, true), nil)
+
     local function has(items, label)
         for _, item in ipairs(items) do
             if (item.text_func and "Backend" or item.text) == label then return true end
@@ -359,6 +364,7 @@ do -- Kindle (decision 2026-10-28): setup hint after a failed pairing, pair by a
     check("address pair: says why", last().text, "Not a Bluetooth address")
     menu:pairAddress(" 00:11:22:33:44:aa ")
     check("address pair: valid address paired", paired_with and paired_with.mac, "00:11:22:33:44:AA")
+    check("address pair: no per-device info reads", paired_with and paired_with.skip_info, true)
     menu.pairFoundDevice = saved
 end
 
