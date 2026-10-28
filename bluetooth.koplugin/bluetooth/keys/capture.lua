@@ -23,6 +23,11 @@ end
 
 local function hook(_, ev)
     if ev.type ~= Capture.EV_KEY then return end
+    -- A fresh press means the release was lost; stop swallowing, or that
+    -- key (often a page turn) stays dead (decision 2026-10-28).
+    if swallow_code and ev.code == swallow_code and ev.value == 1 then
+        swallow_code = nil
+    end
     if swallow_code and ev.code == swallow_code then
         if ev.value == 0 then swallow_code = nil end
         ev.code = NEUTRAL_CODE
@@ -55,7 +60,10 @@ function Capture.listen(listen_callback, timeout_s)
         timeout_fn = nil
         local cb = callback
         callback = nil
-        if cb then cb(nil) end
+        if cb then
+            local ok, err = pcall(cb, nil)
+            if not ok then logger.warn("bluetooth keys: capture timeout callback failed:", err) end
+        end
     end
     UIManager:scheduleIn(timeout_s or DEFAULT_TIMEOUT_S, timeout_fn)
 end

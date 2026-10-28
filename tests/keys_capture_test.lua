@@ -76,5 +76,26 @@ check(fire({ type = 1, code = 108, value = 1 }).code == 108 and calls == 0, "no 
 Capture.listen(function() error("boom") end)
 check(pcall(fire, { type = 1, code = 108, value = 1 }), "callback error contained")
 
+-- Lost release: a fresh press of the swallowed code must pass, not vanish.
+Capture.stop()
+calls = 0
+Capture.listen(cb)
+fire({ type = 1, code = 104, value = 1 }) -- captured, release never arrives
+check(fire({ type = 1, code = 104, value = 1 }).code == 104, "fresh press after a lost release passes")
+check(fire({ type = 1, code = 104, value = 0 }).code == 104, "its release passes too")
+-- ... and is captured if someone is listening again.
+Capture.listen(cb)
+fire({ type = 1, code = 105, value = 1 })
+calls = 0
+Capture.listen(cb)
+local ev2 = fire({ type = 1, code = 105, value = 1 })
+check(calls == 1 and got == 105 and ev2.code == 0, "fresh press after a lost release is captured when listening")
+fire({ type = 1, code = 105, value = 0 })
+
+-- A failing timeout callback must not escape into UIManager.
+scheduled = {}
+Capture.listen(function() error("boom") end)
+check(#scheduled == 1 and pcall(scheduled[#scheduled]), "timeout callback error contained")
+
 if failures > 0 then os.exit(1) end
 print("keys_capture_test: ok")
