@@ -226,6 +226,77 @@ do
     check(c and c[3] == 108 and c[4] == "reader", "remove: this screen")
 end
 
+-- A "(not connected)" row is still tappable and can be removed.
+do
+    local data = { Old = { { code = 108, screens = { reader = true }, action = { kind = "key", name = "LPgFwd" } } } }
+    local m, store = setup({}, data)
+    local row = m:menuTable()[2].sub_item_table_func()[1]
+    check(row.enabled ~= false, "stale: row tappable")
+    row.callback()
+    press("Remove")
+    local c = store:find("remove")
+    check(c and c[2] == "Old" and c[3] == 108 and c[4] == "reader", "stale: removed")
+end
+
+-- Remove on a linked binding asks; "Both screens" removes both.
+do
+    local data = { Remote = { { code = 108, screens = { reader = true, filemanager = true }, action = { kind = "key", name = "LPgFwd" } } } }
+    local m, store = setup({ { name = "Remote", connected = true } }, data)
+    m:menuTable()[2].sub_item_table_func()[1].callback()
+    press("Remove")
+    check(lastText():find("Remove from both screens", 1, true) ~= nil, "linked remove: asks")
+    press("Both screens")
+    check(store:count("remove") == 2, "linked remove: both screens")
+end
+
+-- Changing a linked binding on both screens: set with both.
+do
+    local data = { Remote = { { code = 108, screens = { reader = true, filemanager = true }, action = { kind = "key", name = "LPgFwd" } } } }
+    local m, store = setup({ { name = "Remote", connected = true } }, data)
+    m:menuTable()[2].sub_item_table_func()[1].callback()
+    press("Change action")
+    press("Both screens")
+    press("Keys")
+    press("Up")
+    local c = store:find("set")
+    check(c and c[3].screens.reader and c[3].screens.filemanager and c[3].action.name == "Up", "linked change: both")
+    check(store:count("split") == 0, "linked change: no split")
+end
+
+-- "Both" over two one-screen bindings clears them, then sets one linked.
+do
+    local data = { Remote = {
+        { code = 108, screens = { reader = true }, action = { kind = "key", name = "Up" } },
+        { code = 108, screens = { filemanager = true }, action = { kind = "key", name = "Down" } } } }
+    local m, store = setup({ { name = "Remote", connected = true } }, data)
+    m:startBind()
+    listening(108)
+    press("Both")
+    press("Keys")
+    press("Left")
+    check(store:count("remove") == 2, "both over singles: cleared")
+    local c = store:find("set")
+    check(c and c[3].screens.reader and c[3].screens.filemanager, "both over singles: linked set")
+end
+
+-- Back in a Dispatcher category goes up; at the top it closes.
+do
+    local m, store = setup({ { name = "Remote", connected = true } })
+    m:startBind()
+    listening(30)
+    press("Reader")
+    press("All actions…")
+    local picker = last()
+    local top = picker.item_table
+    picker.item_table_stack = {}
+    picker.switchItemTable = function(self, _, t) self.item_table = t end
+    picker:onMenuSelect(top[1])
+    picker:onClose()
+    check(picker.item_table == top, "back: up one level")
+    picker:onClose()
+    check(store:count("set") == 0, "back: closed with nothing chosen")
+end
+
 if failures > 0 then
     print(failures .. " failure(s)")
     os.exit(1)

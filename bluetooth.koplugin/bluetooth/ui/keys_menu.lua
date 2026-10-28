@@ -131,7 +131,17 @@ function KeysMenu:pickDispatcher(screen, done)
         end
         return true
     end
-    picker.onClose = function() finish(); return true end
+    -- Back in a category goes up one level; only the top level closes.
+    picker.onClose = function(menu)
+        local stack = menu.item_table_stack
+        if stack and #stack > 0 then
+            local parent = table.remove(stack)
+            menu:switchItemTable(parent.title, parent)
+        else
+            finish()
+        end
+        return true
+    end
     UIManager:show(picker)
 end
 
@@ -255,13 +265,26 @@ function KeysMenu:changeBinding(remote, b, screen)
     end
 end
 
+function KeysMenu:removeBinding(remote, b, screen)
+    local function remove(scope)
+        local screens = scope == "both" and { "reader", "filemanager" } or { scope }
+        for _i, s in ipairs(screens) do self.store:remove(remote, b.code, s) end
+        self.on_change()
+    end
+    if isLinked(b) then
+        choose(_("Remove from both screens, or only here?"), {
+            { text = _("Both screens"), value = "both" },
+            { text = _("Only here"), value = screen },
+        }, remove)
+    else
+        remove(screen)
+    end
+end
+
 function KeysMenu:editBinding(remote, b, screen)
     choose(T(_("%1: button %2"), remote, b.code), {
         { text = _("Change action"), value = function() self:changeBinding(remote, b, screen) end },
-        { text = _("Remove"), value = function()
-            self.store:remove(remote, b.code, screen)
-            self.on_change()
-        end },
+        { text = _("Remove"), value = function() self:removeBinding(remote, b, screen) end },
     }, function(fn) fn() end)
 end
 
@@ -273,12 +296,11 @@ function KeysMenu:bindingRows(screen)
             if b.screens[screen] then
                 local text = T("%1: %2 → %3", remote, b.code, Actions.label(b.action))
                 if isLinked(b) then text = text .. " " .. _("(both)") end
-                -- Kept and listed while the remote is away (decision 2026-10-28).
-                local active = connected[remote] == true
-                if not active then text = text .. " " .. _("(not connected)") end
+                -- Kept, listed and editable while the remote is away
+                -- (decision 2026-10-28).
+                if not connected[remote] then text = text .. " " .. _("(not connected)") end
                 rows[#rows + 1] = {
                     text = text,
-                    enabled = active,
                     callback = function() self:editBinding(remote, b, screen) end,
                 }
             end
