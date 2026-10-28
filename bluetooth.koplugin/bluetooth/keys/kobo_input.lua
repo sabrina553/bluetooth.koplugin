@@ -13,6 +13,7 @@ local opened = {}
 --- Test-only: forgets what this session opened.
 function KoboInput._reset()
     opened = {}
+    KoboInput.connected_key = nil
 end
 
 --- `path target` lines from LISTING_SCRIPT -> the uhid devices.
@@ -66,6 +67,37 @@ function KoboInput.openNew(input, devices)
                 logger.warn("KoboInput: could not open", dev.path, tostring(err))
             end
         end
+    end
+end
+
+-- Time for the HID link to come up and its uhid device to appear; a guess
+-- until a tester log shows the real delay.
+KoboInput.SETTLE_S = 3
+
+--- Looks for new input devices once the link has had time to come up.
+---@param capture fun(cmd: string): string
+function KoboInput.openLater(capture)
+    local UIManager = require("ui/uimanager")
+    UIManager:scheduleIn(KoboInput.SETTLE_S, function()
+        KoboInput.openNew(require("device").input, KoboInput.scan(capture))
+    end)
+end
+
+--- Called with each device read: when the set of connected devices changes
+--- and isn't empty, looks for input devices, since a connect can outlast the
+--- wait and a remote can reconnect by itself (review 2026-10-28).
+---@param devices table[]|nil
+---@param capture fun(cmd: string): string
+function KoboInput.onDevices(devices, capture)
+    local connected = {}
+    for _, dev in ipairs(devices or {}) do
+        if dev.connected then table.insert(connected, dev.mac) end
+    end
+    table.sort(connected)
+    local key = table.concat(connected, ",")
+    if key ~= (KoboInput.connected_key or "") then
+        KoboInput.connected_key = key
+        if key ~= "" then KoboInput.openLater(capture) end
     end
 end
 
