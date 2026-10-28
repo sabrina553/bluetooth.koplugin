@@ -2,7 +2,7 @@
 
 A Bluetooth plugin for [KOReader](https://koreader.rocks/): scan for devices, pair, connect and manage them from the KOReader menu, and have them reconnect after the reader wakes.
 
-> **Status: in development.** It currently supports PocketBook (and Linux, for testing). Expect rough edges and please report them on the [issue tracker](https://github.com/sabrina553/bluetooth.koplugin/issues); feature requests are welcome too.
+> **Status: in development.** It currently supports PocketBook (and Linux, for testing), with experimental Kobo MTK and Kindle support. Expect rough edges and please report them on the [issue tracker](https://github.com/sabrina553/bluetooth.koplugin/issues); feature requests are welcome too.
 
 ## Supported devices
 
@@ -10,7 +10,9 @@ A Bluetooth plugin for [KOReader](https://koreader.rocks/): scan for devices, pa
 | --- | --- |
 | PocketBook (Linux-based) | Supported. Power is switched with `netagent`, everything else through BlueZ. |
 | Linux desktop / KOReader emulator | Supported through BlueZ (`bluetoothctl`). |
-| Kobo, Kindle, Android | Not yet. The plugin disables itself on these. |
+| Kobo MTK (Libra Colour, Clara BW/Colour, Tolino Shine 5) | Experimental, development builds only, untested on a device. Talks to Kobo's own Bluetooth service over D-Bus. |
+| Kindle (with Bluetooth) | Experimental, development builds only, untested on a device. Headphones pair as usual; remotes need a one-time setup, see [Kindle](#kindle). |
+| Older Kobo, Android | Not yet. The plugin disables itself on these. |
 
 Tested on a PocketBook Verse Pro, Verse Pro Colour and Era Colour, and on Fedora under the KOReader emulator. It should work on other Linux-based PocketBooks that ship BlueZ.
 
@@ -47,6 +49,18 @@ Bluetooth is never switched on automatically: if you turned it off, it stays off
 
 A device you have trusted may reconnect by itself after you disconnect it, because BlueZ accepts connections from trusted devices. Untrust it if you do not want that.
 
+## Kindle
+
+Kindle's own software only pairs audio devices such as headphones. Page-turn remotes, keyboards and game controllers need a one-time setup first, which needs root access. The plugin never changes system files itself.
+
+Once it's done, you can pair remotes from the plugin (including **Pair by address…** on the scan screen, since Kindle's scan may not list them), turn pages with them, and bind their buttons to any KOReader action.
+
+The setup is described in [kindlebtcontroller.koplugin's README](https://github.com/finlater/kindlebtcontroller.koplugin#before-you-install-prepare-bluetooth-pairing) and the [MobileRead guide](https://www.mobileread.com/forums/showthread.php?t=369712). In short: a udev rule and a small helper script so the Kindle treats the remote as an input device, pairing with `ace_bt_cli`, and marker files that stop disconnects filling the disk with logs.
+
+- It is verified on the Kindle Paperwhite 5 and 6.
+- **Don't** try it on older models such as the Oasis 1 or Paperwhite 3: they can end up on a white screen that needs recovery.
+- Only classic Bluetooth remotes work; Bluetooth Low Energy (BLE) ones don't.
+
 ## Updating
 
 **Settings → About** shows the installed version and checks GitHub for a newer one. Pick a channel under **Update Channel**:
@@ -73,7 +87,7 @@ for t in tests/*_test.lua; do luajit "$t"; done
 
 ## Credits
 
-Forked from, and jump-started by, the PocketBook work of [last-available-username](https://github.com/last-available-username). Plugins like this are built for their users and on the back of their contributions.
+Forked from, and jump-started by, the PocketBook work of [last-available-username](https://github.com/last-available-username). Plugins like this are built for their users and on the back of their contributions. Code adapted from other plugins is listed in [CREDITS.md](./bluetooth.koplugin/CREDITS.md).
 
 ## Licence
 
