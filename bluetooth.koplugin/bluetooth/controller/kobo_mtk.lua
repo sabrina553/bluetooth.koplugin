@@ -55,13 +55,28 @@ function KoboMTK:shouldFallBack(err, msg)
     return false
 end
 
+-- Quitting waits on this read, so it gives up sooner than other calls.
+local QUIT_CHECK_TIMEOUT_MS = 1000
+
+--- Whether Kobo's Bluetooth service is running; true, false or nil on error.
+function KoboMTK:serviceOwned(timeout_ms)
+    local owner = DbusParse.property(self.capture(Dbus.commandWithTimeout(timeout_ms or Dbus.REPLY_TIMEOUT_MS,
+        "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.NameHasOwner", "string:" .. self.service)))
+    if owner == true then KoboMTK.used = true end
+    return owner
+end
+
+--- For the reboot-on-exit check: ownership only, no Powered read.
+function KoboMTK:checkUsed()
+    if not KoboMTK.used then self:serviceOwned(QUIT_CHECK_TIMEOUT_MS) end
+    return KoboMTK.used
+end
+
 --- Not owned means Kobo's Bluetooth service isn't running, so the radio is off.
 function KoboMTK:status()
-    local owner = DbusParse.property(self.capture(Dbus.command("org.freedesktop.DBus",
-        "/org/freedesktop/DBus", "org.freedesktop.DBus.NameHasOwner", "string:" .. self.service)))
+    local owner = self:serviceOwned()
     local powered = false
     if owner == true then
-        KoboMTK.used = true
         powered = BluezDbus.status(self)
     end
     local state = tostring(owner) .. "/" .. tostring(powered)

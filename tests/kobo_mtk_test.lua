@@ -133,6 +133,15 @@ check(on_at and set_at and on_at < set_at, "power: manager On before Powered")
 check(script:find("BluedroidManager1.Off", 1, true) ~= nil, "power: rollback Off in the script")
 check(network.order[2] == "wifi off", "wifi off: switched off again after powering")
 
+-- The quit check reads ownership only, with a short reply timeout.
+fake({ NameHasOwner = TRUE })
+check(kobo:checkUsed() == true, "quit check: owned service counts as used")
+check(#calls == 1 and calls[1]:find("--reply-timeout=1000", 1, true) ~= nil, "quit check: one short read")
+fake({ NameHasOwner = TRUE })
+KoboMTK.used = true
+kobo:checkUsed()
+check(#calls == 0, "quit check: no read once already used")
+
 -- A second tap during the Wi-Fi wait doesn't start a second power-up.
 stubNetwork(false)
 fake()
