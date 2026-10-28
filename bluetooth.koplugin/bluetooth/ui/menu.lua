@@ -840,9 +840,11 @@ function BluetoothMenu:pairFoundDevice(dev, on_refresh)
         else
             -- Kindle's setup advice stays until tapped (decision 2026-10-28).
             local hint = self.controller:pairFailedHint()
+            local timeout = 2
+            if hint then timeout = nil end
             UIManager:show(InfoMessage:new{
                 text = hint or (_("Could not confirm pairing with ") .. displayName(dev)),
-                timeout = not hint and 2 or nil,
+                timeout = timeout,
             })
         end
         if on_refresh then
