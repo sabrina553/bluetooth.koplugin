@@ -691,6 +691,49 @@ function BluetoothMenu:setUpdateChannel(channel, touchmenu_instance)
     touchmenu_instance:updateItems()
 end
 
+--- The scan screen's rows: "Pair by address…" first where the backend can
+--- pair a typed address (Kindle's scan may never list a remote, decision
+--- 2026-10-28), then the unpaired devices.
+function BluetoothMenu:searchItems()
+    local items = buildItemTable(self.controller.known_devices)
+    if self.controller:can("address_pair") then
+        table.insert(items, 1, { text = _("Pair by address…"), address_pair = true })
+    end
+    return items
+end
+
+---@param text string what the user typed
+---@param on_refresh function|nil
+function BluetoothMenu:pairAddress(text, on_refresh)
+    local mac = (text or ""):match("^%s*(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)%s*$")
+    if not mac then
+        UIManager:show(InfoMessage:new{ text = _("Not a Bluetooth address"), timeout = 3 })
+        return
+    end
+    mac = mac:upper()
+    local Devices = require("bluetooth/controller/devices")
+    self:pairFoundDevice(Devices:fromScan(mac, mac, self.controller.backend, self.controller), on_refresh)
+end
+
+function BluetoothMenu:showPairByAddress(on_refresh)
+    local InputDialog = require("ui/widget/inputdialog")
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Pair by address"),
+        input_hint = "XX:XX:XX:XX:XX:XX",
+        buttons = { {
+            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+            { text = _("Pair"), is_enter_default = true, callback = function()
+                local text = dialog:getInputText()
+                UIManager:close(dialog)
+                self:pairAddress(text, on_refresh)
+            end },
+        } },
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
 function BluetoothMenu:showSearchResults(on_refresh)
     local scan_duration = 15
     local poll_interval = 1
@@ -703,8 +746,11 @@ function BluetoothMenu:showSearchResults(on_refresh)
 
     self.search_menu = Menu:new{
         title = _("Searching for devices…"),
-        item_table = buildItemTable(self.controller.known_devices),
+        item_table = self:searchItems(),
         onMenuSelect = function(_, item)
+            if item.address_pair then
+                return self:showPairByAddress(on_refresh)
+            end
             self:pairFoundDevice(item.dev, on_refresh)
         end,
         close_callback = function()
@@ -749,7 +795,7 @@ function BluetoothMenu:showSearchResults(on_refresh)
             local first_on_page = ((menu.page or 1) - 1) * (menu.perpage or 1) + 1
             menu:switchItemTable(
                 done and _("Search complete") or _("Searching for devices…"),
-                buildItemTable(self.controller.known_devices),
+                self:searchItems(),
                 first_on_page
             )
             if not done then
@@ -789,9 +835,11 @@ function BluetoothMenu:pairFoundDevice(dev, on_refresh)
                 table.insert(self.controller.known_devices, dev)
             end
         else
+            -- Kindle's setup advice stays until tapped (decision 2026-10-28).
+            local hint = self.controller:pairFailedHint()
             UIManager:show(InfoMessage:new{
-                text = _("Could not confirm pairing with ") .. displayName(dev),
-                timeout = 2,
+                text = hint or (_("Could not confirm pairing with ") .. displayName(dev)),
+                timeout = not hint and 2 or nil,
             })
         end
         if on_refresh then
