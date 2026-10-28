@@ -44,9 +44,15 @@ end
 
 function Store:init()
     self.data = {}
+    local opened, handle = pcall(LuaSettings.open, LuaSettings, self.path)
+    if not opened or not handle then
+        -- Without a handle nothing is ever saved; say so (decision 2026-10-28).
+        logger.err("Bluetooth key store: cannot open settings file, bindings will not be saved:", handle)
+        return
+    end
+    self.handle = handle
     local ok, result = pcall(function()
-        self.handle = LuaSettings:open(self.path)
-        return self.handle:readSetting(SETTING_KEY, {})
+        return handle:readSetting(SETTING_KEY, {})
     end)
     if not ok or type(result) ~= "table" then
         -- A corrupt file must not stop the plugin loading (decision 2026-10-28).
@@ -66,6 +72,10 @@ function Store:init()
 end
 
 function Store:write()
+    if not self.handle then
+        logger.err("Bluetooth key store: no settings file open, binding not saved")
+        return false
+    end
     local ok, err = pcall(function()
         self.handle:saveSetting(SETTING_KEY, self.data)
         self.handle:flush()

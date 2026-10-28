@@ -1,15 +1,19 @@
 -- Run from the repo root: luajit tests/keys_store_test.lua
 package.path = "bluetooth.koplugin/?.lua;tests/?.lua;" .. package.path
 local rejectDescription = require("helpers").rejectDescription
+local errs, warns = {}, {}
 package.preload["logger"] = function()
     local noop = function() end
-    return { dbg = noop, info = noop, warn = noop, err = noop }
+    return { dbg = noop, info = noop,
+        warn = function(...) warns[#warns + 1] = table.concat({ ... }, " ") end,
+        err = function(...) errs[#errs + 1] = table.concat({ ... }, " ") end }
 end
 package.preload["datastorage"] = function() return { getSettingsDir = function() return "/nonexistent" end } end
 -- In-memory "files" keyed by path, so a second open sees what the first flushed.
 local files = {}
 package.preload["luasettings"] = function()
     return { open = function(_, path)
+        if path == "/throws" then error("disk gone") end
         files[path] = files[path] or {}
         local kv = files[path]
         return {
@@ -93,6 +97,13 @@ check(next(g:list(R)) == nil and #g:remotes() == 0, "garbage bindings give an em
 files[path] = { bindings = { [R] = "junk", Ok = { { code = 1, screens = { reader = true }, action = key("A") } } } }
 local g2 = Store:new({ path = path })
 check(next(g2:list(R)) == nil and #g2:list("Ok") == 1, "garbage remote entry skipped")
+
+-- open failure: logged at open and again at each write.
+errs = {}
+local broken = Store:new({ path = "/throws" })
+check(#errs == 1 and errs[1]:find("cannot open", 1, true), "open failure logs an error")
+broken:set(R, { code = 5, screens = { reader = true }, action = key("A") })
+check(#errs == 2 and errs[2]:find("not saved", 1, true), "write without a handle logs an error")
 
 os.remove(path)
 if failures > 0 then os.exit(1) end
