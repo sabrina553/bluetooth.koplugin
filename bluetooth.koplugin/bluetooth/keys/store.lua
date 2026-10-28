@@ -28,9 +28,17 @@ local function overlaps(a, b)
     return false
 end
 
+-- A hand-edited file must not write nil over a live key (decision 2026-10-28).
+local function isAction(a)
+    if type(a) ~= "table" then return false end
+    if a.kind == "key" then return type(a.name) == "string" end
+    if a.kind == "dispatcher" then return type(a.actions) == "table" end
+    return false
+end
+
 local function isBinding(b)
     return type(b) == "table" and type(b.code) == "number"
-        and type(b.screens) == "table" and type(b.action) == "table"
+        and type(b.screens) == "table" and isAction(b.action)
 end
 
 function Store:new(opts)
@@ -97,6 +105,10 @@ end
 
 --- Replace any binding for the same code on an overlapping screen, else append.
 function Store:set(remote, binding)
+    if not isBinding(binding) then
+        logger.warn("Bluetooth key store: refusing malformed binding")
+        return false
+    end
     local list = self.data[remote] or {}
     self.data[remote] = list
     local new = deepCopy(binding)
@@ -104,11 +116,12 @@ function Store:set(remote, binding)
         if b.code == new.code and overlaps(b.screens, new.screens) then
             list[i] = new
             self:write()
-            return
+            return true
         end
     end
     list[#list + 1] = new
     self:write()
+    return true
 end
 
 function Store:remove(remote, code, screen)

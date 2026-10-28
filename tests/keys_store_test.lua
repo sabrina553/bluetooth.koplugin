@@ -98,6 +98,26 @@ files[path] = { bindings = { [R] = "junk", Ok = { { code = 1, screens = { reader
 local g2 = Store:new({ path = path })
 check(next(g2:list(R)) == nil and #g2:list("Ok") == 1, "garbage remote entry skipped")
 
+-- malformed actions: skipped on load, refused on set.
+files[path] = { bindings = { [R] = {
+    { code = 1, screens = { reader = true }, action = { kind = "key" } },
+    { code = 2, screens = { reader = true }, action = { kind = "dispatcher", actions = "x" } },
+    { code = 3, screens = "reader", action = key("A") },
+    { code = 4, screens = { reader = true }, action = { kind = "bogus", name = "A" } },
+    { code = 5, screens = { reader = true }, action = key("B") },
+} } }
+warns = {}
+local m = Store:new({ path = path })
+local ml = m:list(R)
+check(#ml == 1 and ml[1].code == 5 and #warns == 4, "malformed actions skipped with a WARN each on load")
+check(m:set(R, { code = 6, screens = { reader = true }, action = { kind = "key" } }) == false,
+    "set refuses a key action without a name")
+check(m:set(R, { code = 6, screens = { reader = true }, action = { kind = "dispatcher" } }) == false,
+    "set refuses a dispatcher action without actions")
+check(m:set(R, { code = 6, screens = true, action = key("A") }) == false, "set refuses non-table screens")
+check(#m:list(R) == 1, "refused sets change nothing")
+check(m:set(R, { code = 6, screens = { reader = true }, action = key("A") }) == true, "set accepts a valid binding")
+
 -- open failure: logged at open and again at each write.
 errs = {}
 local broken = Store:new({ path = "/throws" })
