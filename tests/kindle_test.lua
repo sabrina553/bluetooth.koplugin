@@ -226,6 +226,15 @@ local real_lipc = require("bluetooth/controller/kindle_lipc_for_tests")
 logs = {}
 check(real_lipc.readHash("ListPaired") == nil, "lipc: a throwing read is nil")
 check(destroyed == 1 and closed == 1, "lipc: hash array destroyed and handle closed, got " .. destroyed .. "/" .. closed)
+
+-- setString builds a shell command, so it refuses anything but a MAC itself.
+local real_execute, executed = os.execute, {}
+os.execute = function(cmd) table.insert(executed, cmd) return 0 end
+check(real_lipc.setString("Connect", "00:11:22:33:44:55; reboot") == false, "lipc: setString refuses a non-MAC")
+check(#executed == 0, "lipc: nothing run for a non-MAC")
+real_lipc.setString("Connect", MAC)
+check(#executed == 1 and executed[1]:find(MAC, 1, true) ~= nil, "lipc: setString runs for a MAC")
+os.execute = real_execute
 for _, line in ipairs(logs) do
     check(not line:find(MAC, 1, true), "lipc: MAC unmasked in log: " .. line)
 end
