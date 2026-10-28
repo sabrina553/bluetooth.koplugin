@@ -103,17 +103,25 @@ end
 
 --- Switches Wi-Fi on for the power-up if it was off, then off again
 --- (decision 2026-10-28: silently, no prompt).
+--- A second enable while one is under way is ignored: its Wi-Fi off would
+--- otherwise land in the middle of the other's power-up.
 function KoboMTK:enable()
+    if KoboMTK.enabling then
+        logger.info("KoboMTK: already powering on, ignoring enable")
+        return
+    end
+    KoboMTK.enabling = true
     logger.dbg("KoboMTK: Enabling Bluetooth...")
     local network = self:networkManager()
     if network:isWifiOn() then
-        return self:powerOn()
+        return self:powerOn(function() KoboMTK.enabling = false end)
     end
     logger.info("KoboMTK: Wi-Fi off, switching it on for the power-up")
     network:restoreWifiAsync()
     local UIManager = require("ui/uimanager")
     UIManager:scheduleIn(WIFI_SETTLE_S, function()
         self:powerOn(function()
+            KoboMTK.enabling = false
             logger.info("KoboMTK: switching Wi-Fi off again")
             network:disableWifi(nil, false)
         end)

@@ -45,6 +45,7 @@ local calls, scripts, async_reply
 local function fake(answers)
     calls, scripts, logs, scheduled = {}, {}, {}, {}
     KoboMTK.used = false
+    KoboMTK.enabling = false
     BluezDbus.reset()
     Bluez.timeoutPrefix = function(secs) return "timeout " .. secs .. " " end
     Bluez.capture = function(cmd)
@@ -123,6 +124,18 @@ local set_at = script:find("variant:boolean:true", 1, true)
 check(on_at and set_at and on_at < set_at, "power: manager On before Powered")
 check(script:find("BluedroidManager1.Off", 1, true) ~= nil, "power: rollback Off in the script")
 check(network.order[2] == "wifi off", "wifi off: switched off again after powering")
+
+-- A second tap during the Wi-Fi wait doesn't start a second power-up.
+stubNetwork(false)
+fake()
+kobo:enable()
+kobo:enable()
+check(#network.order == 1, "double enable: Wi-Fi switched on once")
+check(#scheduled == 1, "double enable: one power-up waiting")
+runScheduled()
+check(#scripts == 1, "double enable: one power script")
+kobo:enable()
+check(#scheduled == 1, "double enable: enabling again works once the first finished")
 
 -- Wi-Fi already on: no juggling, and it stays on.
 stubNetwork(true)
