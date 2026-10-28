@@ -822,5 +822,19 @@ do -- Capabilities (decision 2026-10-28): the menu asks the controller.
     check(c:can("trust") == false, "can: no backend is false, not an error")
 end
 
+
+do -- Kobo MTK keeps its backend whatever the mode setting (decision 2026-10-28).
+    local KoboMTK = require("bluetooth/controller/kobo_mtk")
+    local kobo = KoboMTK:new()
+    for _, setting in ipairs({ "auto", "fast", "compatible" }) do
+        local c = setmetatable({ type = "KoboMTK", backend = kobo,
+            settings = { getBackendMode = function() return setting end } }, { __index = controller })
+        c:applyMode()
+        check(c.backend == kobo, "Kobo MTK keeps its backend with setting " .. setting)
+        check(c:can("transport") == false, "Kobo MTK hides the mode choice")
+        check(c:activeMode() == "fast", "Kobo MTK is always fast, setting " .. setting)
+    end
+end
+
 if failures > 0 then os.exit(1) end
 print("controller_test: ok")

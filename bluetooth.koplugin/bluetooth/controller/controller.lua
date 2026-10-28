@@ -8,6 +8,7 @@ local BackendSelect = require("bluetooth/controller/backend_select")
 local PocketBook = require("bluetooth/controller/pocketbook")
 local Bluez = require("bluetooth/controller/bluez")
 local BluezDbus = require("bluetooth/controller/bluez_dbus")
+local KoboMTK = require("bluetooth/controller/kobo_mtk")
 local Dbus = require("bluetooth/controller/dbus")
 local Standby = require("bluetooth/standby")
 local Poll = require("bluetooth/controller/poll")
@@ -59,6 +60,7 @@ local backends = {
     PocketBook = PocketBook:new(),
     Bluez = Bluez:new(),
     BluezDbus = BluezDbus:new(),
+    KoboMTK = KoboMTK:new(),
 }
 
 function controller:init()
@@ -91,10 +93,15 @@ function controller:applyMode(reset)
     if reset then BluezDbus.reset() end
     local setting = self.settings and self.settings.getBackendMode and self.settings:getBackendMode() or "auto"
     self.mode = BackendSelect.mode(setting, Dbus.available())
+    if self.type == "KoboMTK" then
+        -- D-Bus only; the shared setting may still say Compatible.
+        self.mode = "fast"
+    end
     local transport = self.mode == "fast" and BluezDbus or Bluez
     if self.backend == backends.PocketBook and self.backend.setTransport then
         self.backend:setTransport(transport)
     elseif self.type == "Bluez" then
+        -- Only plain BlueZ swaps; Kobo MTK has no Compatible mode.
         self.backend = self.mode == "fast" and backends.BluezDbus or backends.Bluez
         self.backend.controller = self
     end
