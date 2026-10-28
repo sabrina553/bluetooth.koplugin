@@ -17,6 +17,11 @@
   `uhid` sysfs link and opening it with `Device.input:open` is adapted from
   [onatbas/bluetooth.koplugin](https://github.com/onatbas/bluetooth.koplugin),
   MIT licence, Copyright (c) 2024 Bluetooth Page Turner Contributors.
+- `bluetooth/controller/kindle.lua`: the lipc list reads and their field names, A2DP
+  scanning and the Bond/Connect/Disconnect calls are adapted from ZenOS (GPL-3.0); power
+  (`BTflightMode`), state (`BTstate`) and the remote setup the README points to come from
+  [finlater/kindlebtcontroller.koplugin](https://github.com/finlater/kindlebtcontroller.koplugin),
+  MIT licence, Copyright (c) 2025 qiuyukang.
 
 ## References
 
@@ -24,7 +29,6 @@ Read for ideas while planning other devices; no code taken from them unless list
 
 | Repo | Platform | Licence |
 |---|---|---|
-| [finlater/kindlebtcontroller.koplugin](https://github.com/finlater/kindlebtcontroller.koplugin) | Kindle | MIT |
 | [igarizio/pocketbook8bitdo.koplugin](https://github.com/igarizio/pocketbook8bitdo.koplugin) | PocketBook | MIT |
 | [last-available-username/pocketbook-bluetooth.koplugin](https://github.com/last-available-username/pocketbook-bluetooth.koplugin) | PocketBook | GPL-3.0 |
 | [majjam/bluetooth.koplugin](https://github.com/majjam/bluetooth.koplugin) | Kobo MTK | none (ideas only) |

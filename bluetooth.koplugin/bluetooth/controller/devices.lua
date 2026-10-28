@@ -67,7 +67,8 @@ function Devices:applyInfo(info)
 end
 
 function Devices:refresh()
-    if not self.backend or not self.backend.info then
+    -- readInfo alone is enough: Kindle has no bluetoothctl-style info.
+    if not self.backend or not (self.backend.info or self.backend.readInfo) then
         logger.warn("Devices:refresh called with no backend set on device " .. Parse.maskMac(self.mac))
         return self
     end
@@ -308,7 +309,8 @@ function Devices:trust(callback)
         if callback then callback(false) end
         return
     end
-    if self.trusted then
+    -- Already trusted, or a backend with no trust (Kindle): nothing to do.
+    if self.trusted or not self.backend.trust then
         if callback then callback(true) end
         return
     end

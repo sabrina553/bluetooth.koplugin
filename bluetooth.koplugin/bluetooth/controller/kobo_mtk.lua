@@ -31,9 +31,6 @@ local WIFI_SETTLE_S = 1
 local POWER_TIMEOUT_S = 20
 local PAIR_TIMEOUT_S = 30
 local DEFAULT_SCAN_S = 10
--- Time for the HID link to come up and its uhid device to appear; a guess
--- until a tester log shows the real delay.
-local INPUT_SETTLE_S = 3
 
 function KoboMTK:new(ctrl)
     return setmetatable({ controller = ctrl }, KoboMTK)
@@ -147,34 +144,12 @@ end
 --- appears (see kobo_input.lua).
 function KoboMTK:connect(mac)
     BluezDbus.connect(self, mac)
-    self:openInputLater()
+    KoboInput.openLater(self.capture)
 end
 
---- Looks for the remote's input device once the HID link has had time to
---- come up. Also run from device reads (below), since a connect can take
---- longer than the wait and a remote can reconnect by itself (review
---- 2026-10-28).
-function KoboMTK:openInputLater()
-    local UIManager = require("ui/uimanager")
-    UIManager:scheduleIn(INPUT_SETTLE_S, function()
-        KoboInput.openNew(require("device").input, KoboInput.scan(self.capture))
-    end)
-end
-
---- As BluezDbus, and checks for input devices whenever the set of connected
---- devices changes.
 function KoboMTK:devicesFrom(objects)
     local devices = BluezDbus.devicesFrom(self, objects)
-    local connected = {}
-    for _, dev in ipairs(devices or {}) do
-        if dev.connected then table.insert(connected, dev.mac) end
-    end
-    table.sort(connected)
-    local key = table.concat(connected, ",")
-    if key ~= (KoboMTK.connected_key or "") then
-        KoboMTK.connected_key = key
-        if key ~= "" then self:openInputLater() end
-    end
+    KoboInput.onDevices(devices, self.capture)
     return devices
 end
 

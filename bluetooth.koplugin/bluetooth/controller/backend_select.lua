@@ -5,11 +5,19 @@
 
 local BackendSelect = {}
 
+local LIPC_GET = "/usr/bin/lipc-get-prop"
+
+local function fileExists(path)
+    local f = io.open(path, "r")
+    if f then f:close() end
+    return f ~= nil
+end
+
 --- The order matters: Android is checked first so it never falls through to
 --- a Linux-style backend, and a device we have no backend for returns nil.
 ---@param Device table KOReader's `device` module
 ---@param file_exists function|nil path -> boolean, for tests
----@return string|nil backend "PocketBook", "Bluez" or "KoboMTK", nil if unsupported
+---@return string|nil backend "PocketBook", "Bluez", "KoboMTK" or "Kindle", nil if unsupported
 function BackendSelect.select(Device, file_exists)
     if Device:isAndroid() then
         return nil
@@ -19,10 +27,13 @@ function BackendSelect.select(Device, file_exists)
         -- Only MTK models so far; older Kobos start their stack by hand
         -- (decision 2026-10-28).
         return BackendSelect.family(Device, file_exists) == "kobo-mtk" and "KoboMTK" or nil
+    elseif Device:isKindle() then
+        -- Only where Kindle's lipc tools exist; older Kindles without
+        -- Bluetooth stay disabled (decision 2026-10-28).
+        return (file_exists or fileExists)(LIPC_GET) and "Kindle" or nil
     elseif Device:isEmulator() or Device:isDesktop() then
         return "Bluez"
     end
-    -- Kindle has no backend yet.
     return nil
 end
 
@@ -32,15 +43,8 @@ local MTK_SERVICE = "/usr/share/dbus-1/system-services/com.kobo.mtk.bluedroid.se
 -- Libra 2, Clara 2E and Sage: the stack is started by hand.
 local KOBO_LEGACY = { Kobo_io = true, Kobo_goldfinch = true, Kobo_cadmus = true }
 
-local function fileExists(path)
-    local f = io.open(path, "r")
-    if f then f:close() end
-    return f ~= nil
-end
-
---- Which kind of device this is, for logging and for the platform backends
---- to come (decision 2026-10-28). Detection only: `select` still returns
---- nil for Kobo and Kindle.
+--- Which kind of device this is, for logging and for `select` (decision
+--- 2026-10-28).
 ---@param Device table KOReader's `device` module
 ---@param file_exists function|nil path -> boolean, for tests
 ---@return string|nil family "kobo-mtk" | "kobo-legacy" | "kobo" | "kindle"

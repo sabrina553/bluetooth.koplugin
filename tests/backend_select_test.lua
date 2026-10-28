@@ -72,6 +72,9 @@ family("unknown", {}, {}, nil)
 check("Kobo MTK without the service file has no backend", { isKobo = true, isMTK = true }, nil)
 check("Kobo MTK gets its backend", { isKobo = true, isMTK = true }, "KoboMTK", { [MTK_SERVICE] = true })
 
+check("Kindle without lipc has no backend", { isKindle = true }, nil)
+check("Kindle with lipc gets its backend", { isKindle = true }, "Kindle", { ["/usr/bin/lipc-get-prop"] = true })
+
 if failures > 0 then
     print(failures .. " failure(s)")
     os.exit(1)

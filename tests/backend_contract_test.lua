@@ -60,6 +60,11 @@ b.capabilities = nil
 ok, problems = Contract.check(b)
 check(not ok and mentions(problems, "capabilities"), "a backend without a capabilities table fails")
 
+b = full()
+check(Contract.FEATURES.address_pair ~= nil, "address_pair is a known feature")
+b.capabilities.address_pair = true
+check((Contract.check(b)), "address_pair needs no methods")
+
 -- Methods inherited through a metatable count, as BluezDbus inherits Bluez.
 local child = setmetatable({ capabilities = full().capabilities }, { __index = full() })
 check((Contract.check(child)), "inherited methods count")
@@ -72,7 +77,7 @@ package.preload["logger"] = function()
     return { dbg = noop, info = noop, warn = noop, err = noop }
 end
 package.preload["ui/uimanager"] = function() return {} end
-for _, name in ipairs({ "bluez", "bluez_dbus", "pocketbook", "kobo_mtk" }) do
+for _, name in ipairs({ "bluez", "bluez_dbus", "pocketbook", "kobo_mtk", "kindle" }) do
     local backend = require("bluetooth/controller/" .. name)
     ok, problems = Contract.check(backend)
     check(ok, name .. " meets the contract: " .. table.concat(problems, "; "))

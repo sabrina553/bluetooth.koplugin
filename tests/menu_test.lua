@@ -51,11 +51,13 @@ local function last() return shown[#shown] or {} end
 
 local live = false
 local cannot = {} -- features the stub backend lacks
+local hint -- the stub backend's advice after a failed pairing
 local mode = "fast"
 local menu = BluetoothMenu:new({
     settings = { getLiveUpdates = function() return live end },
     controller = { activeMode = function() return mode end, is_enabled = true, known_devices = {},
-        can = function(_, feature) return not cannot[feature] end },
+        can = function(_, feature) return not cannot[feature] end,
+        pairFailedHint = function() return hint end },
 })
 menu.refresh = function() end
 
@@ -325,6 +327,39 @@ do -- Capabilities (decision 2026-10-28): items a backend can't do are omitted.
     check("caps: Live updates hidden", has(settings, "Live updates (experimental)"), false)
     check("caps: About still last", settings[#settings].text, "About")
     cannot = {}
+end
+
+do -- Kindle (decision 2026-10-28): setup hint after a failed pairing, pair by address.
+    local dev = { mac = "00:11:22:33:44:55", name = "Pager", paired = false,
+        pair = function(_, cb) cb(false) end }
+    hint = nil
+    shown = {}
+    menu:pairFoundDevice(dev)
+    check("no hint: short failure message", last().timeout, 2)
+    hint = "Remotes need a one-time setup"
+    shown = {}
+    menu:pairFoundDevice(dev)
+    check("hint: shown", last().text, hint)
+    check("hint: stays until tapped", last().timeout, nil)
+    hint = nil
+
+    cannot = { address_pair = true }
+    local items = menu:searchItems()
+    check("address pair: absent without the capability", items[1] and items[1].address_pair, nil)
+    cannot = {}
+    items = menu:searchItems()
+    check("address pair: first item with the capability", items[1] and items[1].address_pair, true)
+
+    local paired_with
+    local saved = menu.pairFoundDevice
+    menu.pairFoundDevice = function(_, d) paired_with = d end
+    shown = {}
+    menu:pairAddress("not an address")
+    check("address pair: bad address refused", paired_with, nil)
+    check("address pair: says why", last().text, "Not a Bluetooth address")
+    menu:pairAddress(" 00:11:22:33:44:aa ")
+    check("address pair: valid address paired", paired_with and paired_with.mac, "00:11:22:33:44:AA")
+    menu.pairFoundDevice = saved
 end
 
 if failures > 0 then
