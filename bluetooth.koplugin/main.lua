@@ -60,6 +60,14 @@ function Bluetooth:init()
         settings = self.settings,
         device_store = self.device_store,
     })
+    if self.controller.type == "KoboMTK" then
+        local KoboMTK = require("bluetooth/controller/kobo_mtk")
+        require("bluetooth/controller/kobo_reboot").install(UIManager, function()
+            -- One last look, as ZenOS does: Nickel may have started the service.
+            if not KoboMTK.used then self.controller.backend:status() end
+            return KoboMTK.used
+        end)
+    end
 
     self.key_store = KeyStore:new()
     self.keys_menu = KeysMenu:new({
