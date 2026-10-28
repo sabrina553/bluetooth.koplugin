@@ -137,15 +137,19 @@ function KoboMTK:disable()
 end
 
 --- A one-shot dbus-send keeps discovery running on Kobo's service (unlike
---- bluetoothd), so it is stopped on a timer.
+--- bluetoothd), so it is stopped on a timer. One timer only, as on Kindle:
+--- an earlier scan's timer would cut a newer scan short.
 function KoboMTK:search(duration)
     duration = duration or DEFAULT_SCAN_S
     logger.dbg("KoboMTK: scanning for " .. duration .. "s")
-    self.capture(self:command(self.adapter, "org.bluez.Adapter1.StartDiscovery"))
     local UIManager = require("ui/uimanager")
-    UIManager:scheduleIn(duration, function()
+    if KoboMTK.scan_timer then UIManager:unschedule(KoboMTK.scan_timer) end
+    self.capture(self:command(self.adapter, "org.bluez.Adapter1.StartDiscovery"))
+    KoboMTK.scan_timer = function()
+        KoboMTK.scan_timer = nil
         self.capture(self:command(self.adapter, "org.bluez.Adapter1.StopDiscovery"))
-    end)
+    end
+    UIManager:scheduleIn(duration, KoboMTK.scan_timer)
 end
 
 --- Connects as BluezDbus does, then opens the remote's input device once it

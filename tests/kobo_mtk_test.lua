@@ -10,7 +10,14 @@ package.preload["logger"] = function()
 end
 local scheduled = {}
 package.preload["ui/uimanager"] = function()
-    return { scheduleIn = function(_, _, fn) table.insert(scheduled, fn) end }
+    return {
+        scheduleIn = function(_, _, fn) table.insert(scheduled, fn) end,
+        unschedule = function(_, fn)
+            for i = #scheduled, 1, -1 do
+                if scheduled[i] == fn then table.remove(scheduled, i) end
+            end
+        end,
+    }
 end
 local input_opened = {}
 package.preload["device"] = function()
@@ -46,6 +53,7 @@ local function fake(answers)
     calls, scripts, logs, scheduled = {}, {}, {}, {}
     KoboMTK.used = false
     KoboMTK.enabling = false
+    KoboMTK.scan_timer = nil
     BluezDbus.reset()
     Bluez.timeoutPrefix = function(secs) return "timeout " .. secs .. " " end
     Bluez.capture = function(cmd)
@@ -166,6 +174,12 @@ kobo:search(7)
 check(ran("StartDiscovery") and not ran("StopDiscovery"), "search: discovery started")
 runScheduled()
 check(ran("StopDiscovery"), "search: discovery stopped when the timer fires")
+
+-- A second scan replaces the first one's stop timer, so it runs its full time.
+fake()
+kobo:search(7)
+kobo:search(7)
+check(#scheduled == 1, "overlapping scans: one stop timer")
 
 -- Pair: Device1.Pair in the background; result reaches on_done.
 local result = "unset"
