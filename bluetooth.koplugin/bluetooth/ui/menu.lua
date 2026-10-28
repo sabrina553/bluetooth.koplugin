@@ -862,9 +862,10 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
                             text = _("Device: ") .. dev.name .. "\n" ..
                                    _("MAC: ") .. dev.mac .. "\n" ..
                                    _("Paired: ") .. tostring(dev.paired) .. "\n" ..
-                                   _("Connected: ") .. tostring(dev.connected) .. "\n" ..
-                                   _("Trusted: ") .. tostring(dev.trusted) .. "\n" ..
-                                   _("Blocked: ") .. tostring(dev.blocked) ..
+                                   _("Connected: ") .. tostring(dev.connected) ..
+                                   -- Kindle can't manage these, so it would show "nil".
+                                   (self.controller:can("trust") and ("\n" .. _("Trusted: ") .. tostring(dev.trusted)) or "") ..
+                                   (self.controller:can("block") and ("\n" .. _("Blocked: ") .. tostring(dev.blocked)) or "") ..
                                    (dev.held and ("\n" .. _("Stays off on wake until you connect it")) or ""),
 
                         }
