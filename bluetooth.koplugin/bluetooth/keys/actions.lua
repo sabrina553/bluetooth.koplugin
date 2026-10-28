@@ -33,6 +33,8 @@ local function fileManagerCommon()
         entry(_("Collections"), { collections = true }),
         entry(_("Open previous book"), { open_previous_document = true }),
         entry(_("Night mode"), { night_mode = true }),
+        -- Dispatcher marks it valid on both screens (decision 2026-10-28).
+        entry(_("Toggle frontlight"), { toggle_frontlight = true }),
     }
 end
 
@@ -74,6 +76,8 @@ local function sameActions(a, b)
 end
 
 function Actions.label(action)
+    if type(action) ~= "table" then return _("Unknown action") end
+    if action.kind == "key" and not action.name then return _("Unknown action") end
     if action.kind == "key" then
         for _i, k in ipairs(Actions.keys()) do
             if k.name == action.name then return k.text end

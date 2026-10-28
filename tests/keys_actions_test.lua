@@ -31,10 +31,10 @@ local function has(list, id)
 end
 check(not has(Actions.common("filemanager"), "page_jmp"), "filemanager has no page_jmp")
 check(has(Actions.common("reader"), "page_jmp"), "reader has page_jmp")
-check(#Actions.common("reader") == 10 and #Actions.common("filemanager") == 7, "list sizes")
+check(#Actions.common("reader") == 10 and #Actions.common("filemanager") == 8, "list sizes")
 
 local both = Actions.forBoth()
-check(#both > 0, "forBoth is not empty")
+check(#both == 4 and has(both, "toggle_frontlight"), "forBoth has four entries incl. frontlight")
 for _, e in ipairs(both) do
     local id = next(e.actions)
     check(has(Actions.common("reader"), id) and has(Actions.common("filemanager"), id),
@@ -46,8 +46,8 @@ check(Actions.label({ kind = "dispatcher", actions = { next_chapter = true } }) 
     "common label")
 check(Actions.label({ kind = "dispatcher", actions = { gone_action = true } }) == "Unknown action",
     "erroring Dispatcher gives Unknown action")
-check(Actions.label({ kind = "dispatcher", actions = { gone_action = true } }) == "Unknown action",
-    "erroring Dispatcher gives Unknown action")
+check(Actions.label(nil) == "Unknown action", "nil action")
+check(Actions.label({ kind = "key" }) == "Unknown action", "key action without a name")
 dispatcherMode = "ok"
 check(Actions.label({ kind = "dispatcher", actions = { gone_action = true } }) == "Unknown action",
     "Unknown item from Dispatcher gives Unknown action")
