@@ -110,6 +110,15 @@ function controller:activeMode()
     return self.mode or "compatible"
 end
 
+--- Whether the backend can do an optional feature (trust, block, transport,
+--- info); see backend_contract.lua. The menu hides what it cannot.
+---@param feature string
+---@return boolean
+function controller:can(feature)
+    local caps = self.backend and self.backend.capabilities
+    return caps ~= nil and caps[feature] == true
+end
+
 function controller:Devicetype()
     self.type = BackendSelect.select(Device)
 end

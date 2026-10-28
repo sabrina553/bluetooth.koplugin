@@ -64,6 +64,20 @@ check(not ok and mentions(problems, "capabilities"), "a backend without a capabi
 local child = setmetatable({ capabilities = full().capabilities }, { __index = full() })
 check((Contract.check(child)), "inherited methods count")
 
+-- The real backends. BluezDbus is what the controller swaps in for Fast
+-- mode, so it is checked on its own, not only through Bluez.
+package.preload["gettext"] = function() return function(s) return s end end
+package.preload["logger"] = function()
+    local noop = function() end
+    return { dbg = noop, info = noop, warn = noop, err = noop }
+end
+package.preload["ui/uimanager"] = function() return {} end
+for _, name in ipairs({ "bluez", "bluez_dbus", "pocketbook" }) do
+    local backend = require("bluetooth/controller/" .. name)
+    ok, problems = Contract.check(backend)
+    check(ok, name .. " meets the contract: " .. table.concat(problems, "; "))
+end
+
 if failures > 0 then
     os.exit(1)
 end
