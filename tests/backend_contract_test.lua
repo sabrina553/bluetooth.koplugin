@@ -72,7 +72,7 @@ package.preload["logger"] = function()
     return { dbg = noop, info = noop, warn = noop, err = noop }
 end
 package.preload["ui/uimanager"] = function() return {} end
-for _, name in ipairs({ "bluez", "bluez_dbus", "pocketbook" }) do
+for _, name in ipairs({ "bluez", "bluez_dbus", "pocketbook", "kobo_mtk" }) do
     local backend = require("bluetooth/controller/" .. name)
     ok, problems = Contract.check(backend)
     check(ok, name .. " meets the contract: " .. table.concat(problems, "; "))

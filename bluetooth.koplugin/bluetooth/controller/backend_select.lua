@@ -8,16 +8,21 @@ local BackendSelect = {}
 --- The order matters: Android is checked first so it never falls through to
 --- a Linux-style backend, and a device we have no backend for returns nil.
 ---@param Device table KOReader's `device` module
----@return string|nil backend "PocketBook" or "Bluez", nil if unsupported
-function BackendSelect.select(Device)
+---@param file_exists function|nil path -> boolean, for tests
+---@return string|nil backend "PocketBook", "Bluez" or "KoboMTK", nil if unsupported
+function BackendSelect.select(Device, file_exists)
     if Device:isAndroid() then
         return nil
     elseif Device:isPocketBook() then
         return "PocketBook"
+    elseif Device:isKobo() then
+        -- Only MTK models so far; older Kobos start their stack by hand
+        -- (decision 2026-10-28).
+        return BackendSelect.family(Device, file_exists) == "kobo-mtk" and "KoboMTK" or nil
     elseif Device:isEmulator() or Device:isDesktop() then
         return "Bluez"
     end
-    -- Kindle and Kobo have no backend yet.
+    -- Kindle has no backend yet.
     return nil
 end
 

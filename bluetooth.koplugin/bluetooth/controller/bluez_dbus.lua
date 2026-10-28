@@ -63,6 +63,27 @@ function BluezDbus.reset()
     BluezDbus.broken = nil
 end
 
+--- Instance hooks for the bluetoothctl fallback, so a backend with no
+--- bluetoothctl (Kobo MTK) can switch it off (decision 2026-10-28).
+---@return boolean
+function BluezDbus:fallenBack()
+    return BluezDbus.broken ~= nil
+end
+
+---@param err string|nil
+---@param msg string|nil
+---@return boolean
+function BluezDbus:shouldFallBack(err, msg)
+    return BluezDbus.giveUp(err, msg)
+end
+
+--- False on a backend with no bluetoothctl at all (Kobo MTK): a call D-Bus
+--- can't make (a bad MAC) then fails instead of falling back.
+---@return boolean
+function BluezDbus:hasBluetoothctl()
+    return true
+end
+
 function BluezDbus:command(path, method, ...)
     return Dbus.command(self.service, path, method, ...)
 end
@@ -86,7 +107,7 @@ function BluezDbus:devicesFrom(objects)
 end
 
 function BluezDbus:status()
-    if BluezDbus.broken then return Bluez.status(self) end
+    if self:fallenBack() then return Bluez.status(self) end
     local output = self.capture(self:command(self.adapter, "org.freedesktop.DBus.Properties.Get",
         "string:org.bluez.Adapter1", "string:Powered"))
     if Bluez.lastTimedOut() then
@@ -95,7 +116,7 @@ function BluezDbus:status()
     end
     local powered, err, msg = DbusParse.property(output)
     if powered == nil then
-        if BluezDbus.giveUp(err, msg) then return Bluez.status(self) end
+        if self:shouldFallBack(err, msg) then return Bluez.status(self) end
         -- No bluetoothd answers while the radio is off.
         logger.dbg("BluezDbus: no power state (" .. tostring(err) .. "), reading as off")
         return false
@@ -105,7 +126,7 @@ end
 
 --- Blocking read, as Bluez:knownDevices(): nil on a failed read.
 function BluezDbus:knownDevices()
-    if BluezDbus.broken then return Bluez.knownDevices(self) end
+    if self:fallenBack() then return Bluez.knownDevices(self) end
     local output = self.capture(self:managedObjectsCommand())
     if Bluez.lastTimedOut() then
         logger.warn("BluezDbus: listing devices timed out")
@@ -113,7 +134,7 @@ function BluezDbus:knownDevices()
     end
     local objects, err, msg = DbusParse.managedObjects(output)
     if not objects then
-        if BluezDbus.giveUp(err, msg) then return Bluez.knownDevices(self) end
+        if self:shouldFallBack(err, msg) then return Bluez.knownDevices(self) end
         logger.warn("BluezDbus: could not list devices:", err)
         return nil
     end
@@ -130,7 +151,7 @@ end
 --- Background read, as Bluez:readSnapshot(): done(devices), or done(nil).
 ---@param done fun(devices: table|nil)
 function BluezDbus:readSnapshot(done)
-    if BluezDbus.broken then return Bluez.readSnapshot(self, done) end
+    if self:fallenBack() then return Bluez.readSnapshot(self, done) end
     Bluez.runAsync(self:snapshotScript(), function(text)
         local rc = text and tonumber(text:match("@@rc (%d+)%s*$"))
         if rc == nil or rc == 124 or rc == 143 or rc == 137 then
@@ -139,7 +160,7 @@ function BluezDbus:readSnapshot(done)
         end
         local objects, err, msg = DbusParse.managedObjects((text:gsub("@@rc %d+%s*$", "")))
         if not objects then
-            if BluezDbus.giveUp(err, msg) then return Bluez.readSnapshot(self, done) end
+            if self:shouldFallBack(err, msg) then return Bluez.readSnapshot(self, done) end
             logger.warn("BluezDbus: could not list devices:", err)
             return done(nil)
         end
@@ -173,8 +194,14 @@ local ACTION_TIMEOUT_S = 5
 ---@param timeout_s integer|nil
 function BluezDbus:action(label, mac, fallback, build, timeout_s)
     local path = Dbus.devicePath(self.adapter, mac)
-    local cmd = path and not BluezDbus.broken and build(path)
-    if not cmd then return fallback() end
+    local cmd = path and not self:fallenBack() and build(path)
+    if not cmd then
+        if not self:hasBluetoothctl() then
+            logger.warn("BluezDbus: " .. label .. " " .. Parse.maskMac(tostring(mac)) .. ": no D-Bus command and no bluetoothctl")
+            return
+        end
+        return fallback()
+    end
     timeout_s = timeout_s or ACTION_TIMEOUT_S
     logger.dbg("BluezDbus: " .. label .. " Bluetooth device: " .. Parse.maskMac(mac))
     local script = ("%s%s 2>&1\necho \"@@rc $?\"\n"):format(Bluez.timeoutPrefix(timeout_s), cmd)
@@ -188,7 +215,7 @@ function BluezDbus:action(label, mac, fallback, build, timeout_s)
         if not err then return end
         if ALREADY_DONE[err] then
             logger.dbg("BluezDbus: " .. label .. " " .. Parse.maskMac(mac) .. ": already done (" .. err .. ")")
-        elseif BluezDbus.giveUp(err, msg) then
+        elseif self:shouldFallBack(err, msg) then
             fallback()
         else
             logger.warn("BluezDbus: " .. label .. " " .. Parse.maskMac(mac) .. " failed:", err, Parse.maskMac(msg))
@@ -247,7 +274,8 @@ end
 ---@return table|nil
 function BluezDbus:readInfo(mac)
     local path = Dbus.devicePath(self.adapter, mac)
-    if BluezDbus.broken or not path then
+    if self:fallenBack() or not path then
+        if not self:hasBluetoothctl() then return nil end
         return Parse.info(Bluez.info(self, mac))
     end
     local output = self.capture(self:command(path, "org.freedesktop.DBus.Properties.GetAll",
@@ -264,7 +292,7 @@ function BluezDbus:readInfo(mac)
         if err == "org.freedesktop.DBus.Error.UnknownObject" then
             return { mac = mac, paired = false, bonded = false, trusted = false, blocked = false, connected = false }
         end
-        if BluezDbus.giveUp(err, msg) then return Parse.info(Bluez.info(self, mac)) end
+        if self:shouldFallBack(err, msg) then return Parse.info(Bluez.info(self, mac)) end
         return nil
     end
     return DbusParse.device(path, props)

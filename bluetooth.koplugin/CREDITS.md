@@ -10,14 +10,20 @@
 - `bluetooth/controller/backend_select.lua`: Kobo family detection (the MTK D-Bus service
   file and the Libra 2, Clara 2E and Sage model names) is adapted from
   [xZenLabs/zen-os](https://github.com/xZenLabs/zen-os) (GPL-3.0).
+- `bluetooth/controller/kobo_mtk.lua` and `kobo_reboot.lua`: the Kobo MTK power, Wi-Fi,
+  scan and pairing sequences and the reboot instead of quitting to Nickel are adapted
+  from the same project (GPL-3.0).
+- `bluetooth/keys/kobo_input.lua`: finding a Bluetooth remote's input device by the
+  `uhid` sysfs link and opening it with `Device.input:open` is adapted from
+  [onatbas/bluetooth.koplugin](https://github.com/onatbas/bluetooth.koplugin),
+  MIT licence, Copyright (c) 2024 Bluetooth Page Turner Contributors.
 
 ## References
 
-Read for ideas while planning other devices; no code taken from them yet.
+Read for ideas while planning other devices; no code taken from them unless listed above.
 
 | Repo | Platform | Licence |
 |---|---|---|
-| [onatbas/bluetooth.koplugin](https://github.com/onatbas/bluetooth.koplugin) | Kobo | MIT |
 | [finlater/kindlebtcontroller.koplugin](https://github.com/finlater/kindlebtcontroller.koplugin) | Kindle | MIT |
 | [igarizio/pocketbook8bitdo.koplugin](https://github.com/igarizio/pocketbook8bitdo.koplugin) | PocketBook | MIT |
 | [last-available-username/pocketbook-bluetooth.koplugin](https://github.com/last-available-username/pocketbook-bluetooth.koplugin) | PocketBook | GPL-3.0 |

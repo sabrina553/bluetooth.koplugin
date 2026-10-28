@@ -3,13 +3,13 @@ package.path = "bluetooth.koplugin/?.lua;" .. package.path
 local BackendSelect = require("bluetooth/controller/backend_select")
 
 local failures = 0
-local function check(description, flags, expected)
+local function check(description, flags, expected, files)
     local Device = setmetatable({}, {
         __index = function(_, name)
             return function() return flags[name] == true end
         end,
     })
-    local actual = BackendSelect.select(Device)
+    local actual = BackendSelect.select(Device, function(path) return (files or {})[path] == true end)
     if actual ~= expected then
         failures = failures + 1
         print(("FAIL %s: got %s, expected %s"):format(description, tostring(actual), tostring(expected)))
@@ -19,7 +19,7 @@ end
 check("PocketBook", { isPocketBook = true }, "PocketBook")
 check("emulator", { isEmulator = true }, "Bluez")
 check("desktop", { isDesktop = true }, "Bluez")
-check("Kobo has no backend", { isKobo = true }, nil)
+check("non-MTK Kobo has no backend", { isKobo = true }, nil)
 check("Kindle has no backend", { isKindle = true }, nil)
 check("Android has no backend", { isAndroid = true }, nil)
 check("Android wins over PocketBook", { isAndroid = true, isPocketBook = true }, nil)
@@ -69,7 +69,8 @@ family("Android", { isAndroid = true, isKobo = true }, {}, "android")
 family("desktop", { isDesktop = true }, {}, "desktop")
 family("emulator", { isEmulator = true }, {}, "desktop")
 family("unknown", {}, {}, nil)
-check("family does not enable Kobo MTK", { isKobo = true, isMTK = true }, nil)
+check("Kobo MTK without the service file has no backend", { isKobo = true, isMTK = true }, nil)
+check("Kobo MTK gets its backend", { isKobo = true, isMTK = true }, "KoboMTK", { [MTK_SERVICE] = true })
 
 if failures > 0 then
     print(failures .. " failure(s)")
