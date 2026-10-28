@@ -33,7 +33,10 @@ end
 package.preload["ui/widget/container/widgetcontainer"] = function() return class() end
 local input_onkeypress_calls = 0
 package.preload["ui/widget/container/inputcontainer"] = function()
-    return { onKeyPress = function() input_onkeypress_calls = input_onkeypress_calls + 1 end }
+    return { onKeyPress = function(self)
+        assert(type(self.key_events) == "table", "key_events must be a table")
+        input_onkeypress_calls = input_onkeypress_calls + 1
+    end }
 end
 
 local hooks = 0
@@ -55,7 +58,7 @@ package.preload["bluetooth/controller/controller"] = function()
 end
 local last_menu
 package.preload["bluetooth/ui/menu"] = function()
-    return { new = function(_, o) last_menu = o; return o end }
+    return { new = function(_, o) last_menu = o; o.stopLiveMonitor = function() end; return o end }
 end
 local last_keys_menu
 package.preload["bluetooth/ui/keys_menu"] = function()
@@ -141,6 +144,23 @@ fm:applyKeys()
 check(event_map[103] == "Down", "later remote in the list wins a clash")
 check(#warns == 1 and warns[1]:find("Page Turner", 1, true) and not warns[1]:find("AA:BB", 1, true),
     "clash WARN names the remotes, not MACs")
+
+-- A closed instance (old view) must not apply its screen's map from a stale callback.
+bindings["Kobo Remote"] = { { code = 108, screens = { reader = true },
+    action = { kind = "key", name = "Down" } } }
+shared_controller.known_devices[2] = nil
+local old = newPlugin({ document = {}, menu = { registerToMainMenu = function() end } })
+check(event_map[108] == "Down", "reader instance applies its map")
+old:onCloseWidget()
+local cur = newPlugin()
+check(event_map[108] == "LPgFwd", "file browser instance restores the name")
+old:applyKeys()
+check(event_map[108] == "LPgFwd", "closed instance's stale callback does not apply its map")
+check(cur.key_events.BTKey108 == nil and old.closed == true, "closed instance marked")
+
+-- onKeyPress before any applyKeys must hand the matcher a table.
+local bare = setmetatable({}, { __index = Bluetooth })
+check(pcall(bare.onKeyPress, bare, {}), "onKeyPress defaults key_events to a table")
 
 if failures > 0 then
     print(failures .. " failure(s)")

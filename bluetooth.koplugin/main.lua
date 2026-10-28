@@ -193,6 +193,10 @@ end
 --- order isn't tracked, so list order stands in for "newest wins" on clashes
 --- (decision 2026-10-28).
 function Bluetooth:applyKeys()
+    -- Wake, cold-start and menu callbacks keep the instance they were made
+    -- on; after a view change it must not apply its old screen's map
+    -- (decision 2026-10-28).
+    if self.closed then return end
     local screen = self.ui.document and "reader" or "filemanager"
     local active, by_remote, seen = {}, {}, {}
     for _, dev in ipairs(self.controller.known_devices or {}) do
@@ -231,11 +235,13 @@ end
 --- KeyPress to their modules, plugins included (WidgetContainer:handleEvent,
 --- registerModule), so borrowing the matcher is enough. decision 2026-10-28
 function Bluetooth:onKeyPress(key)
+    self.key_events = self.key_events or {}
     return InputContainer.onKeyPress(self, key)
 end
 
 --- The plugin closes with its view (file manager <-> book) and on exit.
 function Bluetooth:onCloseWidget()
+    self.closed = true
     if self.menu then self.menu:stopLiveMonitor() end
 end
 
