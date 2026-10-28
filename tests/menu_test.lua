@@ -279,6 +279,16 @@ do
     check("one tap: message", last().text, "Enabling Bluetooth")
 end
 
+-- Buttons sits after Settings once main.lua passes a KeysMenu.
+do
+    check("buttons: absent without a KeysMenu", menu:buildMenuTable()[3].text, "Scan")
+    menu.keys_menu = { menuTable = function() return { "x" } end }
+    local item = menu:buildMenuTable()[3]
+    check("buttons: after Settings", item.text, "Buttons")
+    check("buttons: opens the KeysMenu", item.sub_item_table_func()[1], "x")
+    menu.keys_menu = nil
+end
+
 if failures > 0 then
     print(failures .. " failure(s)")
     os.exit(1)

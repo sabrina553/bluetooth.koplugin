@@ -230,8 +230,10 @@ end
 
 --- Call after bluetooth's been re-enabled and known_devices refreshed on
 --- wake. Reconnects every starred device and/or whatever was connected right
---- before suspend, gated by the corresponding settings.
-function controller:reconnectOnWake()
+--- before suspend, gated by the corresponding settings. `on_connected` runs
+--- after each connect attempt, so key bindings follow the new connections.
+---@param on_connected fun(ok: boolean)|nil
+function controller:reconnectOnWake(on_connected)
     if not self.settings or not self.device_store then
         return
     end
@@ -268,7 +270,7 @@ function controller:reconnectOnWake()
             logger.dbg("Bluetooth: " .. Parse.maskMac(mac) .. " was disconnected by hand, not reconnecting on wake")
         elseif dev then
             logger.dbg("Bluetooth: reconnecting to " .. Parse.maskMac(mac) .. " on wake")
-            dev:connect()
+            dev:connect(on_connected)
         else
             logger.warn("Bluetooth: stored device " .. Parse.maskMac(mac) .. " not found among known_devices, skipping wake reconnect")
         end

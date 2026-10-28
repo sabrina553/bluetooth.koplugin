@@ -21,6 +21,11 @@ local Session = require("bluetooth/session")
 local BluetoothDeviceStore = require("bluetooth/devicestore")
 local GithubAPI = require("bluetooth/ota/github_api")
 local BluetoothSelfUpdater = require("bluetooth/ota/self_updater")
+local KeyStore = require("bluetooth/keys/store")
+local Keymap = require("bluetooth/keys/keymap")
+local Capture = require("bluetooth/keys/capture")
+local KeysMenu = require("bluetooth/ui/keys_menu")
+local InputContainer = require("ui/widget/container/inputcontainer")
 
 
 -- How long a wake must hold before the radio is switched back on. PocketBook
@@ -56,15 +61,27 @@ function Bluetooth:init()
         device_store = self.device_store,
     })
 
+    self.key_store = KeyStore:new()
+    self.keys_menu = KeysMenu:new({
+        controller = self.controller,
+        store = self.key_store,
+        on_change = function() self:applyKeys() end,
+    })
+
     self.menu = BluetoothMenu:new({
         ui = self.ui,
         settings = self.settings,
         controller = self.controller,
         devices = self.devices,
         updater = self.updater,
+        keys_menu = self.keys_menu,
+        on_devices_changed = function() self:applyKeys() end,
     })
 
     self.ui.menu:registerToMainMenu(self.menu)
+
+    Capture.ensureHook(Device.input)
+    self:applyKeys()
 
     if Session.isColdStart() then
         local was_on = self.settings:getRadioWasOn()
@@ -94,7 +111,8 @@ function Bluetooth:restoreBluetoothState(allow_enable)
     local function reconnect()
         self.controller:knownDevices(function(fresh)
             if fresh then
-                self.controller:reconnectOnWake()
+                self:applyKeys()
+                self.controller:reconnectOnWake(function() self:applyKeys() end)
             else
                 logger.dbg("Bluetooth.koplugin: device list went stale during wake, not reconnecting")
             end
@@ -171,8 +189,59 @@ function Bluetooth:onSuspend()
     end)
 end
 
+--- Applies the bindings of the connected remotes for this screen. Connection
+--- order isn't tracked, so list order stands in for "newest wins" on clashes
+--- (decision 2026-10-28).
+function Bluetooth:applyKeys()
+    -- Wake, cold-start and menu callbacks keep the instance they were made
+    -- on; after a view change it must not apply its old screen's map
+    -- (decision 2026-10-28).
+    if self.closed then return end
+    local screen = self.ui.document and "reader" or "filemanager"
+    local active, by_remote, seen = {}, {}, {}
+    for _, dev in ipairs(self.controller.known_devices or {}) do
+        if dev.connected and dev.name and dev.name ~= "" and not seen[dev.name] then
+            seen[dev.name] = true
+            active[#active + 1] = dev.name
+            by_remote[dev.name] = self.key_store:list(dev.name)
+        end
+    end
+    local map, clashes = Keymap.resolve(by_remote, active, screen)
+    for _, c in ipairs(clashes) do
+        logger.warn("Bluetooth.koplugin: button", c.code, "bound by several remotes:",
+            table.concat(c.remotes, ", "), "- using", c.remotes[#c.remotes])
+    end
+    Keymap.apply(Device.input.event_map, map)
+
+    -- Slot handlers live on this instance; a new view builds a new plugin.
+    self.key_events = self.key_events or {}
+    for name in pairs(self.key_events) do
+        if name:sub(1, #Keymap.SLOT_PREFIX) == Keymap.SLOT_PREFIX then
+            self.key_events[name] = nil
+            self["on" .. name] = nil
+        end
+    end
+    for code, b in pairs(map) do
+        if b.action.kind == "dispatcher" then
+            local name = Keymap.SLOT_PREFIX .. code
+            self.key_events[name] = { { name } }
+            self["on" .. name] = function() return Keymap.run(code) end
+        end
+    end
+end
+
+--- A WidgetContainer never reads key_events: InputContainer:onKeyPress does
+--- (inputcontainer.lua onKeyPress). ReaderUI and FileManager propagate
+--- KeyPress to their modules, plugins included (WidgetContainer:handleEvent,
+--- registerModule), so borrowing the matcher is enough. decision 2026-10-28
+function Bluetooth:onKeyPress(key)
+    self.key_events = self.key_events or {}
+    return InputContainer.onKeyPress(self, key)
+end
+
 --- The plugin closes with its view (file manager <-> book) and on exit.
 function Bluetooth:onCloseWidget()
+    self.closed = true
     if self.menu then self.menu:stopLiveMonitor() end
 end
 

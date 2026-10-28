@@ -78,6 +78,12 @@ function BluetoothMenu:new(o)
     return o
 end
 
+--- Fresh device list read: lets the plugin re-apply key bindings to the
+--- remotes now connected (decision 2026-10-28).
+function BluetoothMenu:devicesChanged()
+    if self.on_devices_changed then self.on_devices_changed() end
+end
+
 function BluetoothMenu:addToMainMenu(menu_items)
     menu_items.bluetooth = {
         text = _("Bluetooth"),
@@ -247,6 +253,13 @@ function BluetoothMenu:buildMenuTable()
             separator = true,
         },
     }
+    -- After Settings; only when main.lua passes a KeysMenu (decision 2026-10-28).
+    if self.keys_menu then
+        table.insert(menu, 3, {
+            text = _("Buttons"),
+            sub_item_table_func = function() return self.keys_menu:menuTable() end,
+        })
+    end
     if not self.controller.is_enabled then
         -- Devices below come from the cache; tapping one turns Bluetooth on.
         table.insert(menu, {
@@ -353,6 +366,7 @@ function BluetoothMenu:checkNow(token)
         local before = self:deviceSignature()
         self.controller:knownDevices(function(fresh)
             if fresh and self._poll_token == token and self:deviceSignature() ~= before then
+                self:devicesChanged()
                 self:refreshMenu()
             end
         end)
@@ -409,6 +423,7 @@ function BluetoothMenu:refresh(touchmenu_instance)
         self.controller:knownDevices(function(fresh)
             if fresh then
                 drew = true
+                self:devicesChanged()
                 self:refreshMenu(touchmenu_instance)
             end
         end)
