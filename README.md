@@ -1,6 +1,6 @@
 # Bluetooth.koplugin
 
-A Bluetooth plugin for [KOReader](https://koreader.rocks/): scan for devices, pair, connect and manage them from the KOReader menu, and have them reconnect after the reader wakes.
+A Bluetooth plugin for [KOReader](https://koreader.rocks/): scan for devices, pair, connect and manage them from the KOReader menu, have them reconnect after the reader wakes, and bind remote buttons to KOReader actions.
 
 > **Status: in development.** It currently supports PocketBook (and Linux, for testing), with experimental Kobo MTK and Kindle support. Expect rough edges and please report them on the [issue tracker](https://github.com/sabrina553/bluetooth.koplugin/issues); feature requests are welcome too.
 
@@ -8,15 +8,15 @@ A Bluetooth plugin for [KOReader](https://koreader.rocks/): scan for devices, pa
 
 | Device | State |
 | --- | --- |
-| PocketBook (Linux-based) | Supported. Power is switched with `netagent`, everything else through BlueZ. |
-| Linux desktop / KOReader emulator | Supported through BlueZ (`bluetoothctl`). |
+| PocketBook (Linux-based) | Supported. Power is switched with `netagent`, everything else through BlueZ over D-Bus or `bluetoothctl`. |
+| Linux desktop / KOReader emulator | Supported through BlueZ (D-Bus or `bluetoothctl`). |
 | Kobo MTK (Libra Colour, Clara BW/Colour, Tolino Shine 5) | Experimental, development builds only, untested on a device. Talks to Kobo's own Bluetooth service over D-Bus. |
 | Kindle (with Bluetooth) | Experimental, development builds only, untested on a device. Headphones pair as usual; remotes need a one-time setup, see [Kindle](#kindle). |
 | Older Kobo, Android | Not yet. The plugin disables itself on these. |
 
 Tested on a PocketBook Verse Pro, Verse Pro Colour and Era Colour, and on Fedora under the KOReader emulator. It should work on other Linux-based PocketBooks that ship BlueZ.
 
-It talks to `bluetoothctl`, so it works with both older BlueZ (5.52 on current PocketBooks) and newer releases; it detects which command spellings are available.
+On BlueZ devices it has two backends: **Fast** talks to BlueZ directly over D-Bus, and **Compatible** drives `bluetoothctl`. The default, **Automatic**, uses Fast and falls back to Compatible if D-Bus isn't usable. Both work with older BlueZ (5.52 on current PocketBooks) and newer releases.
 
 ## Installation
 
@@ -33,7 +33,8 @@ Open the top menu, go to **Tools** (the crossed wrench and screwdriver) and choo
 - **Bluetooth** (tick box): turns the controller on or off.
 - **Settings**: see below.
 - **Scan**: searches for nearby devices for a short while and lists them. The list updates as devices appear and keeps your page. Tap a device to pair it.
-- **Your devices** (below the scan entry): tap to connect or disconnect, hold for the device actions (info, pair, trust, block, star).
+- **Buttons**: bind remote buttons to KOReader actions, see [Buttons](#buttons).
+- **Your devices** (below the scan entry): tap to connect or disconnect, hold for the device actions (info, pair, trust, block, star). With Bluetooth off, your saved devices are still listed; tapping one turns Bluetooth on.
 
 ### Settings
 
@@ -42,12 +43,20 @@ Open the top menu, go to **Tools** (the crossed wrench and screwdriver) and choo
 | Disable on Suspend | Switch Bluetooth off when the reader suspends. |
 | Starred on Wake | Reconnect starred devices on wake. |
 | Last on Wake | Reconnect the last connected device on wake. |
+| Backend | Automatic (default), Fast (D-Bus) or Compatible (`bluetoothctl`). Only shown where there is a choice. |
+| Live updates (experimental) | Follow the radio and devices while the menu is open. Off by default. |
 
 Star a device from its hold menu to mark it as a favourite for *Starred on Wake*.
 
 Bluetooth is never switched on automatically: if you turned it off, it stays off after a restart or wake. If it was on when the reader suspended, it is restored on wake.
 
-A device you have trusted may reconnect by itself after you disconnect it, because BlueZ accepts connections from trusted devices. Untrust it if you do not want that.
+Disconnecting a device yourself holds it: it is untrusted so it can't reconnect by itself, and it is skipped on wake until you connect it again.
+
+## Buttons
+
+**Buttons → Bind a button…** asks you to press a button on the remote, then which screen it applies to (Reader, File browser or Both) and which action to run: page turns and other common actions, or any KOReader action. **Reader buttons** and **File browser buttons** list your bindings; tap one to change or remove it.
+
+Bindings are saved per remote, by its Bluetooth name.
 
 ## Kindle
 
@@ -67,9 +76,11 @@ The setup is described in [kindlebtcontroller.koplugin's README](https://github.
 
 | Channel | Gets |
 | --- | --- |
-| Stable | Tagged releases (`X.Y.Z`). |
-| Beta | Release candidates (`X.Y.Z-beta.N`, `-rc.N`) and stable. |
-| Development | Everything, including `X.Y.Z-dev.N` pre-releases. |
+| Stable | Stable releases (`X.Y.Z`). |
+| Beta | Beta releases and release candidates (`X.Y.Z-beta.N`, `-rc.N`). |
+| Development | Development pre-releases (`X.Y.Z-dev.N`). |
+
+Each channel follows only its own releases and offers the newest one, even if its version number is lower than what you have; switch channel to move between them.
 
 Note: the updater does not verify the TLS certificate of GitHub, so only use it on networks you trust, or update by hand.
 
