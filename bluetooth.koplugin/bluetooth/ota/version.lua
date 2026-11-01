@@ -15,12 +15,16 @@ local LABEL_RANK = {
     rc = 3,
 }
 
--- Which pre-release labels each update channel accepts. Stable releases
--- (no label) are accepted by every channel.
+-- Which release labels each update channel accepts. A channel follows its
+-- own branch only (main/beta/dev), so a dev build is never offered a beta
+-- and a channel may offer an older release than the one installed. Chose
+-- this over cross-stage ordering because beta outranked every later dev
+-- build, which made new dev releases unreachable, decision 2026-10-13.
+-- `false` stands for "no label", i.e. a stable release.
 local CHANNEL_LABELS = {
-    stable = {},
+    stable = { [false] = true },
     beta = { beta = true, rc = true },
-    development = { dev = true, beta = true, rc = true },
+    development = { dev = true },
 }
 
 Version.CHANNELS = { "stable", "beta", "development" }
@@ -98,6 +102,15 @@ function Version.isNewer(current, candidate)
     return Version.compare(candidate, current) > 0
 end
 
+--- Whether the two versions differ at all. Used for "update available" since
+--- a channel may offer an older release than the installed one.
+---@param a string
+---@param b string
+---@return boolean
+function Version.isDifferent(a, b)
+    return Version.compare(a, b) ~= 0
+end
+
 ---@param channel string
 ---@return boolean
 function Version.isChannel(channel)
@@ -114,7 +127,42 @@ function Version.channelAccepts(channel, version)
     if not labels or not parsed then
         return false
     end
-    return parsed.label == nil or labels[parsed.label] == true
+    return labels[parsed.label or false] == true
+end
+
+--- Highest release version the channel accepts. Chosen by version, not by
+--- GitHub's list order, so publishing an older hotfix after a newer
+--- pre-release can't make it look like the latest.
+---
+--- Releases without an asset matching `asset_pattern` are skipped: CI attaches
+--- the zip after the release is published, so there is a window where a
+--- release exists but can't be installed.
+---@param releases table[] GitHub release objects
+---@param channel string
+---@param asset_pattern string Lua pattern the zip's name must match
+---@return string|nil
+function Version.pickLatest(releases, channel, asset_pattern)
+    local latest = nil
+    for _, release in ipairs(releases) do
+        local version = release.tag_name
+        -- A release marked pre-release on GitHub never reaches stable,
+        -- whatever its tag says.
+        local allowed = Version.channelAccepts(channel, version)
+            and not (channel == "stable" and release.prerelease)
+
+        local has_asset = false
+        for _, asset in ipairs(type(release.assets) == "table" and release.assets or {}) do
+            if type(asset.name) == "string" and asset.name:match(asset_pattern) then
+                has_asset = true
+                break
+            end
+        end
+
+        if allowed and has_asset and (latest == nil or Version.isNewer(latest, version)) then
+            latest = version
+        end
+    end
+    return latest
 end
 
 return Version

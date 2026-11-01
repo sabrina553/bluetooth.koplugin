@@ -2,22 +2,25 @@ local DataStorage = require("datastorage")
 local LuaSettings = require("luasettings")
 local logger = require("logger")
 local Version = require("bluetooth/ota/version")
+local BackendSelect = require("bluetooth/controller/backend_select")
 
 ---@class BluetoothSettingsData
----@field disable_on_lock boolean
 ---@field disable_on_suspend boolean
----@field enable_on_wake boolean
 ---@field starred_on_wake boolean
 ---@field last_on_wake boolean
+---@field radio_was_on boolean
 ---@field update_channel string "stable" | "beta" | "development"
+---@field backend_mode string "auto" | "fast" | "compatible"
+---@field live_updates boolean
 
 local DEFAULTS = {
-    disable_on_lock = false,
     disable_on_suspend = false,
-    enable_on_wake = false,
     starred_on_wake = false,
     last_on_wake = false,
+    radio_was_on = false,
     update_channel = "stable",
+    backend_mode = "auto",
+    live_updates = false,
 }
 
 local function shallowCopy(t)
@@ -57,7 +60,7 @@ function BluetoothSettings:init()
     if success then
         self.data = result
     else
-        logger:err("Bluetooth Settings: Error reading settings, using defaults", result)
+        logger.err("Bluetooth Settings: Error reading settings, using defaults", result)
         self.data = shallowCopy(DEFAULTS)
         self:write()
     end
@@ -66,37 +69,23 @@ end
 function BluetoothSettings:write()
     local success, error_msg = pcall(function()
         if not self.settings then
-            logger:err("Bluetooth Settings: No settings object available for write")
+            logger.err("Bluetooth Settings: No settings object available for write")
             return false
         end
 
-        logger:dbg("Bluetooth: Saving settings data", self.data)
+        logger.dbg("Bluetooth: Saving settings data", self.data)
         self.settings:saveSetting(SETTING_KEY, self.data)
         self.settings:flush()
-        logger:dbg("Settings saved and flushed successfully")
+        logger.dbg("Settings saved and flushed successfully")
         return true
     end)
 
     if not success then
-        logger:err("error writing settings:", error_msg)
+        logger.err("error writing settings:", error_msg)
         return false
     end
 
     return true
-end
-
-function BluetoothSettings:getDisableOnLock()
-    return self.data.disable_on_lock or DEFAULTS.disable_on_lock
-end
-
-function BluetoothSettings:setDisableOnLock(disable_on_lock)
-    self.data.disable_on_lock = disable_on_lock
-    self:write()
-end
-
-function BluetoothSettings:toggleDisableOnLock()
-    self.data.disable_on_lock = not self:getDisableOnLock()
-    self:write()
 end
 
 function BluetoothSettings:getDisableOnSuspend()
@@ -110,20 +99,6 @@ end
 
 function BluetoothSettings:toggleDisableOnSuspend()
     self.data.disable_on_suspend = not self:getDisableOnSuspend()
-    self:write()
-end
-
-function BluetoothSettings:getEnableOnWake()
-    return self.data.enable_on_wake or DEFAULTS.enable_on_wake
-end
-
-function BluetoothSettings:setEnableOnWake(enable_on_wake)
-    self.data.enable_on_wake = enable_on_wake
-    self:write()
-end
-
-function BluetoothSettings:toggleEnableOnWake()
-    self.data.enable_on_wake = not self:getEnableOnWake()
     self:write()
 end
 
@@ -155,6 +130,29 @@ function BluetoothSettings:toggleLastOnWake()
     self:write()
 end
 
+--- Last radio state the user chose (menu) or had at suspend, restored at a
+--- cold start. Decision: 2026-10-26 session note (boot behaves like wake).
+function BluetoothSettings:getRadioWasOn()
+    return self.data.radio_was_on or DEFAULTS.radio_was_on
+end
+
+function BluetoothSettings:setRadioWasOn(radio_was_on)
+    if self.data.radio_was_on == radio_was_on then return end
+    self.data.radio_was_on = radio_was_on
+    self:write()
+end
+
+--- Live updates while the menu is open (Fast mode only). Experimental and
+--- off by default for the stable release (decision 2026-10-26).
+function BluetoothSettings:getLiveUpdates()
+    return self.data.live_updates or DEFAULTS.live_updates
+end
+
+function BluetoothSettings:toggleLiveUpdates()
+    self.data.live_updates = not self:getLiveUpdates()
+    self:write()
+end
+
 function BluetoothSettings:getUpdateChannel()
     local channel = self.data.update_channel or DEFAULTS.update_channel
     if not Version.isChannel(channel) then
@@ -169,10 +167,25 @@ end
 ---@param channel string "stable" | "beta" | "development"
 function BluetoothSettings:setUpdateChannel(channel)
     if not Version.isChannel(channel) then
-        logger:warn("Bluetooth Settings: ignoring unknown update channel", tostring(channel))
+        logger.warn("Bluetooth Settings: ignoring unknown update channel", tostring(channel))
         return
     end
     self.data.update_channel = channel
+    self:write()
+end
+
+function BluetoothSettings:getBackendMode()
+    local mode = self.data.backend_mode
+    return BackendSelect.MODES[mode] and mode or DEFAULTS.backend_mode
+end
+
+---@param mode string "auto" | "fast" | "compatible"
+function BluetoothSettings:setBackendMode(mode)
+    if not BackendSelect.MODES[mode] then
+        logger.warn("Bluetooth Settings: ignoring unknown backend mode", tostring(mode))
+        return
+    end
+    self.data.backend_mode = mode
     self:write()
 end
 

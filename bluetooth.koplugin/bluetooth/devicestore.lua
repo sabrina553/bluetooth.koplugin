@@ -11,6 +11,7 @@ local logger = require("logger")
 ---@field blocked boolean
 ---@field connected boolean
 ---@field starred boolean
+---@field held boolean
 
 ---@class BluetoothDeviceStore
 ---@field store any
@@ -41,7 +42,7 @@ function BluetoothDeviceStore:init()
     if success then
         self.data = result
     else
-        logger:err("Bluetooth DeviceStore: Error reading store, using empty table", result)
+        logger.err("Bluetooth DeviceStore: Error reading store, using empty table", result)
         self.data = {}
         self:write()
     end
@@ -50,7 +51,7 @@ end
 function BluetoothDeviceStore:write()
     local success, error_msg = pcall(function()
         if not self.store then
-            logger:err("Bluetooth DeviceStore: No store object available for write")
+            logger.err("Bluetooth DeviceStore: No store object available for write")
             return false
         end
         self.store:saveSetting(SETTING_KEY, self.data)
@@ -59,7 +60,7 @@ function BluetoothDeviceStore:write()
     end)
 
     if not success then
-        logger:err("Bluetooth DeviceStore: error writing store:", error_msg)
+        logger.err("Bluetooth DeviceStore: error writing store:", error_msg)
         return false
     end
 
@@ -83,14 +84,17 @@ function BluetoothDeviceStore:save(dev)
         blocked = dev.blocked,
         connected = dev.connected,
         starred = dev.starred,
+        held = dev.held,
     }
 end
 
---- Snapshot a whole list of Devices instances and flush once.
 ---@param devices Devices[]
 function BluetoothDeviceStore:saveAll(devices)
+    self.data = {}
     for _, dev in ipairs(devices or {}) do
-        self:save(dev)
+        if dev.paired then
+            self:save(dev)
+        end
     end
     self:write()
 end

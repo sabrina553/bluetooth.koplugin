@@ -2,6 +2,7 @@ local http = require("socket.http")
 local https = require("ssl.https")
 local json = require("json")
 local ltn12 = require("ltn12")
+local socketutil = require("socketutil")
 
 local PluginMetadata = require("bluetooth/plugin_metadata")
 local logger = require("logger")
@@ -49,9 +50,15 @@ function GithubAPI:request(method, uri, data, sink)
         source = ltn12.source.string(body)
     end
 
+    -- Requests run on the UI thread, so bound how long they can block.
+    -- A caller-supplied sink means a file download, which gets longer limits.
+    -- Timeouts: https://github.com/koreader/koreader/blob/master/frontend/socketutil.lua
     local response_table = {}
     if sink == nil then
-        sink = ltn12.sink.table(response_table)
+        socketutil:set_timeout(socketutil.LARGE_BLOCK_TIMEOUT, socketutil.LARGE_TOTAL_TIMEOUT)
+        sink = socketutil.table_sink(response_table)
+    else
+        socketutil:set_timeout(socketutil.FILE_BLOCK_TIMEOUT, socketutil.FILE_TOTAL_TIMEOUT)
     end
     local _, code, _ = client.request({
         url = uri,
@@ -60,6 +67,7 @@ function GithubAPI:request(method, uri, data, sink)
         source = source,
         sink = sink,
     })
+    socketutil:reset_timeout()
 
     local response_text = table.concat(response_table)
     local response = response_text
@@ -69,17 +77,17 @@ function GithubAPI:request(method, uri, data, sink)
         if success then
             response = decodedResponse
         else
-            logger:warn("Failed to parse JSON:", response_text)
+            logger.warn("Failed to parse JSON:", response_text)
         end
     end
 
     if type(code) ~= "number" then
-        logger:err("Non-numeric response code received:", tostring(code))
+        logger.err("Non-numeric response code received:", tostring(code))
         return false, 0, "Connection error: " .. tostring(code)
     end
 
     if code >= 400 then
-        logger:dbg("bluetooth Connector Request Error", method, uri, code, response)
+        logger.dbg("bluetooth Connector Request Error", method, uri, code, response)
         if type(response) == "table" then
             if response.message then
                 response = response.message
@@ -183,61 +191,6 @@ function GithubAPI:getReleaseAsset(repository, version, name_filter)
         " matched pattern '" .. tostring(name_filter) .. "'"
 end
 
---- Resolves any HTTP redirects on a URL before it's used with a caller-
---- supplied streaming sink (see downloadReleaseArchive).
----
---- GitHub's own docs for release assets are explicit that
---- browser_download_url can respond with either a direct 200 or a 302
---- redirecting to an S3-hosted URL, and that clients need to handle both.
---- request() doesn't follow redirects - it only checks `code >= 400` for
---- failure, so a 302 was silently treated as success while the sink
---- received whatever (tiny, non-zip) body came attached to the redirect
---- response itself. That's why downloads "succeeded" but failed digest
---- verification: the bytes written to disk were never the actual asset.
----
---- Redirects are resolved here using a throwaway sink (we only care about
---- the status code and Location header at this stage) so the real,
---- caller-supplied sink is only ever handed the final, already-resolved
---- URL.
----@param uri string
----@param max_redirects integer|nil
----@return string resolved_uri
-function GithubAPI:resolveRedirects(uri, max_redirects)
-    max_redirects = max_redirects or 5
-
-    for _ = 1, max_redirects do
-        local client
-        if uri:match("^http:") then
-            client = http
-        elseif uri:match("^https:") then
-            client = https
-        else
-            return uri
-        end
-
-        local _, code, headers = client.request({
-            url = uri,
-            method = "GET",
-            headers = { ["User-Agent"] = self:getUserAgent() },
-            sink = function() return 1 end,
-        })
-
-        if type(code) ~= "number" then
-            return uri
-        end
-
-        local is_redirect = (code == 301 or code == 302 or code == 303 or code == 307 or code == 308)
-        if not is_redirect or not headers or not headers.location then
-            return uri
-        end
-
-        uri = headers.location
-    end
-
-    logger:warn("GithubAPI: exceeded max redirects resolving", uri)
-    return uri
-end
-
 ---@return boolean ok success
 ---@return string filename the filename on success or a message on failure
 ---@return table asset the asset definition
@@ -255,11 +208,18 @@ function GithubAPI:downloadReleaseArchive(repository, version, name_filter, down
 
     local bytes_total = asset.size
     local bytes_downloaded = 0
+    local started_at = os.time()
 
     local function sink(chunk, _)
         if not chunk then
             download_file:close()
             return 1
+        end
+
+        -- LuaSocket's own timeout resets on every chunk, so enforce a real limit here.
+        if os.time() - started_at > socketutil.FILE_TOTAL_TIMEOUT then
+            download_file:close()
+            return nil, socketutil.SINK_TIMEOUT_CODE
         end
 
         download_file:write(chunk)
@@ -272,13 +232,15 @@ function GithubAPI:downloadReleaseArchive(repository, version, name_filter, down
         return 1
     end
 
-    local resolved_url = self:resolveRedirects(asset.browser_download_url)
-    local download_ok, code, message = self:request("GET", resolved_url, nil, sink)
+    -- LuaSocket follows GitHub's redirect to the CDN itself (up to 5 hops).
+    local download_ok, code, message = self:request("GET", asset.browser_download_url, nil, sink)
 
     if not download_ok then
         os.remove(download_path)
 
-        if not message then
+        -- With a custom sink the body is never collected, so message is ""
+        -- (truthy) rather than nil.
+        if message == nil or message == "" then
             message = "HTTP Error: " .. tostring(code)
         end
 

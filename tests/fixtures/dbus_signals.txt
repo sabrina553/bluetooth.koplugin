@@ -1,0 +1,40 @@
+signal time=1 sender=:1.1 -> destination=(null destination) serial=1 path=/org/bluez/hci0/dev_00_11_22_33_44_01; interface=org.freedesktop.DBus.Properties; member=PropertiesChanged
+   string "org.bluez.Device1"
+   array [
+      dict entry(
+         string "AdvertisingFlags"
+         variant             array of bytes [
+               06
+            ]
+      )
+   ]
+   array [
+   ]
+signal time=2 sender=:1.1 -> destination=(null destination) serial=2 path=/org/bluez/hci0/dev_00_11_22_33_44_01; interface=org.freedesktop.DBus.Properties; member=PropertiesChanged
+   string "org.bluez.Device1"
+   array [
+      dict entry(
+         string "RSSI"
+         variant             int16 -71
+      )
+   ]
+   array [
+   ]
+signal time=3 sender=:1.1 -> destination=(null destination) serial=3 path=/; interface=org.freedesktop.DBus.ObjectManager; member=InterfacesAdded
+   object path "/org/bluez/hci0/dev_00_11_22_33_44_02/service000c"
+   array [
+      dict entry(
+         string "org.bluez.GattService1"
+         array [
+            dict entry(
+               string "Primary"
+               variant                   boolean true
+            )
+         ]
+      )
+   ]
+signal time=4 sender=:1.1 -> destination=(null destination) serial=4 path=/; interface=org.freedesktop.DBus.ObjectManager; member=InterfacesRemoved
+   object path "/org/bluez/hci0"
+   array [
+      string "org.bluez.Media1"
+   ]

@@ -1,0 +1,3 @@
+# Local helper scripts and resources
+scripts/*
+.tmp/
