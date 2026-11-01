@@ -1,5 +1,6 @@
 -- Run from the repo root: luajit tests/controller_test.lua
-package.path = "bluetooth.koplugin/?.lua;" .. package.path
+package.path = "bluetooth.koplugin/?.lua;tests/?.lua;" .. package.path
+local rejectDescription = require("helpers").rejectDescription
 package.preload["gettext"] = function() return function(s) return s end end
 package.preload["logger"] = function()
     local noop = function() end
@@ -39,9 +40,7 @@ local controller = require("bluetooth/controller/controller")
 
 local failures = 0
 local function check(cond, message)
-    -- A string here means a check(description, actual, expected) call from
-    -- the other test style, which would always pass (it did, 2026-10-26).
-    assert(type(cond) ~= "string", "check(cond, message) called with a description first: " .. tostring(cond))
+    rejectDescription(cond)
     if not cond then
         failures = failures + 1
         print("FAIL " .. message)
@@ -51,6 +50,8 @@ end
 -- Builds a controller on the PocketBook backend with a fake radio. The
 -- backend table the controller picked is replaced wholesale.
 local function build(radio_on, store_data)
+    -- The switch state is shared across instances, so each build starts idle.
+    controller._resetSwitchState()
     local calls = {}
     fake.status = function() return radio_on end
     fake.enable = function() calls.enable = (calls.enable or 0) + 1 end
@@ -293,7 +294,7 @@ do
     local before = c.known_devices
     local dropped = {}
     c:knownDevices(function(ok) table.insert(dropped, ok) end)
-    c._poll_generation = (c._poll_generation or 0) + 1
+    c:enable() -- bumps the shared poll generation, as a real switch would
     finish({ dev("ZZ:ZZ") })
     check(c.known_devices == before, "async: stale result not applied")
     check(#dropped == 1 and dropped[1] == false, "async: stale callback fires once with false")
@@ -348,7 +349,7 @@ do
     check(c.is_enabled == after, "cached status: stale result dropped after a blocking check")
 
     c:statusCached(on_change)
-    c._poll_generation = (c._poll_generation or 0) + 1
+    c:enable() -- bumps the shared poll generation, as a real switch would
     finish(not c.is_enabled)
     check(c.is_enabled == after, "cached status: result dropped after enable/disable")
 
@@ -516,6 +517,80 @@ do
     check(by_enable == true, "superseded by an enable: still wants on")
 end
 
+-- A tap during a restore's enable joins it instead of starting a second
+-- enable, which used to supersede the restore and skip its reconnect
+-- (decision 2026-10-27).
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local on = false
+    local c, calls = build(false)
+    fake.status = function() return on end
+    local a, b = {}, {}
+    c:enableWhenDisabled(function(ok) table.insert(a, ok) end)
+    table.remove(queue, 1)() -- debounce fires, enable sent, radio still off
+    c:enableWhenDisabled(function(ok) table.insert(b, ok) end)
+    on = true
+    drain()
+    check(#a == 1 and a[1] == true, "join: first caller confirmed once, got " .. #a .. " " .. tostring(a[1]))
+    check(#b == 1 and b[1] == true, "join: joiner confirmed once, got " .. #b .. " " .. tostring(b[1]))
+    check(calls.enable == 1, "join: one enable sent, got " .. tostring(calls.enable))
+    check(holds == 0, "join: no standby hold left, got " .. holds)
+end
+
+-- A disable supersedes the enable for its joiners too.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local c = build(false)
+    local a, b = {}, {}
+    c:enableWhenDisabled(function(ok, why) table.insert(a, tostring(ok) .. ":" .. tostring(why)) end)
+    c:enableWhenDisabled(function(ok, why) table.insert(b, tostring(ok) .. ":" .. tostring(why)) end)
+    c:disable()
+    drain()
+    check(#a == 1 and a[1] == "false:superseded", "join disabled: first caller superseded once, got " .. table.concat(a, ","))
+    check(#b == 1 and b[1] == "false:superseded", "join disabled: joiner superseded once, got " .. table.concat(b, ","))
+    check(holds == 0, "join disabled: no standby hold left, got " .. holds)
+end
+
+-- The other way round: a tap starts the enable and the restore joins it.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local on = false
+    local c, calls = build(false)
+    fake.status = function() return on end
+    fake.enable = function() calls.enable = (calls.enable or 0) + 1; on = true end
+    local tap, restore = {}, {}
+    c:enableWhenDisabled(function(ok) table.insert(tap, ok) end)
+    c:enableWhenDisabled(function(ok) table.insert(restore, ok) end)
+    drain()
+    check(#tap == 1 and tap[1] == true, "join reversed: tap confirmed once, got " .. #tap .. " " .. tostring(tap[1]))
+    check(#restore == 1 and restore[1] == true, "join reversed: restore confirmed once, got " .. #restore .. " " .. tostring(restore[1]))
+    check(calls.enable == 1, "join reversed: one enable sent, got " .. tostring(calls.enable))
+    check(holds == 0, "join reversed: no standby hold left, got " .. holds)
+end
+
+-- A joiner that asks again from its callback finds the radio on and starts
+-- nothing new.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local on = false
+    local c, calls = build(false)
+    fake.status = function() return on end
+    fake.enable = function() calls.enable = (calls.enable or 0) + 1; on = true end
+    local again = {}
+    c:enableWhenDisabled(function() end)
+    c:enableWhenDisabled(function()
+        c:enableWhenDisabled(function(ok) table.insert(again, ok) end)
+    end)
+    drain()
+    check(#again == 1 and again[1] == true, "join again: confirmed once, got " .. #again .. " " .. tostring(again[1]))
+    check(calls.enable == 1, "join again: no second enable, got " .. tostring(calls.enable))
+    check(holds == 0, "join again: no standby hold left, got " .. holds)
+end
+
 -- Only the user's own switch blocks the menu, and it still does on the
 -- controller built after a view change.
 do
@@ -568,6 +643,210 @@ do
     logger.warn = saved_warn
     check(#results == 1, "pair failure: the poll ending later does not report twice")
     check(warned == 0, "pair failure: the leftover poll stops without a WARN, got " .. warned)
+end
+
+-- Phones often pair without staying connected as an input: once Paired
+-- reads yes the device is trusted and the pairing reported, connect or not
+-- (code review finding 12, decision 2026-10-27).
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    local Devices = require("bluetooth/controller/devices")
+    local function pairBackend(state, order)
+        return {
+            pair = function() return true end,
+            connect = function() table.insert(order, "connect") end,
+            trust = function() table.insert(order, "trust"); state.trusted = true end,
+            info = function(_, mac)
+                local yn = function(v) return v and "yes" or "no" end
+                return "Device " .. mac .. " (public)\n\tPaired: " .. yn(state.paired) .. "\n\tTrusted: "
+                    .. yn(state.trusted) .. "\n\tConnected: no\n"
+            end,
+        }
+    end
+    local controller_stub = { enableWhenDisabled = function(_, cb) cb(true) end }
+
+    local order, results = {}, {}
+    local dev = Devices:new({ mac = "AA:AA", name = "Phone",
+        backend = pairBackend({ paired = true }, order), controller = controller_stub })
+    dev:pair(function(confirmed, why) table.insert(results, { confirmed, why }) end)
+    drain()
+    check(table.concat(order, ",") == "connect,trust", "pair unconnected: trusted anyway, got " .. table.concat(order, ","))
+    check(dev.trusted == true, "pair unconnected: device reads trusted")
+    check(#results == 1 and results[1][1] == true and results[1][2] == nil,
+        "pair unconnected: reported once as paired, got " .. tostring(results[1] and results[1][1]))
+
+    order, results = {}, {}
+    dev = Devices:new({ mac = "AA:AA", name = "Phone",
+        backend = pairBackend({ paired = false }, order), controller = controller_stub })
+    dev:pair(function(confirmed, why) table.insert(results, { confirmed, why }) end)
+    drain()
+    check(#order == 0, "pair unconfirmed: no connect or trust, got " .. table.concat(order, ","))
+    check(#results == 1 and results[1][1] == false, "pair unconfirmed: reported once as failed")
+end
+
+-- The other "superseded" exits, past the debounce: each calls back once with
+-- the reason and gives its standby hold back.
+local function recorder()
+    local got = {}
+    return got, function(ok, reason) table.insert(got, tostring(ok) .. ":" .. tostring(reason)) end
+end
+
+-- pollField, on a retry: a newer call landed between two polls.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local c = build(false)
+    local got, cb = recorder()
+    c:enable(cb)
+    table.remove(queue, 1)() -- debounce: enable sent, radio still off, retry queued
+    c:disable()
+    drain()
+    check(table.concat(got, ",") == "false:superseded", "poll retry superseded: got " .. table.concat(got, ","))
+    check(holds == 0, "poll retry superseded: holds balanced, got " .. holds)
+end
+
+-- pollField, after status(): a newer call landed while the status read ran.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local c = build(false)
+    local sent = false
+    fake.enable = function() sent = true end
+    fake.status = function()
+        if sent then sent = false; c:disable() end
+        return false
+    end
+    local got, cb = recorder()
+    c:enable(cb)
+    table.remove(queue, 1)() -- debounce: enable sent, disable arrives mid-status
+    check(table.concat(got, ",") == "false:superseded", "status superseded: called back at once, got " .. table.concat(got, ","))
+    drain()
+    check(table.concat(got, ",") == "false:superseded", "status superseded: only once, got " .. table.concat(got, ","))
+    check(holds == 0, "status superseded: holds balanced, got " .. holds)
+end
+
+-- waitForOff: an enable waiting for the radio to go off is replaced by a
+-- newer disable, so its "on" is never sent.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local on, order = true, {}
+    local c = build(true)
+    fake.status = function() return on end
+    fake.disable = function() table.insert(order, "off") end
+    fake.enable = function() table.insert(order, "on"); on = true end
+    c:disable()
+    table.remove(queue, 1)() -- disable debounce: off sent, radio still reads on
+    local got, cb = recorder()
+    c:enable(cb)
+    table.remove(queue, 1)() -- stale disable poll ends
+    table.remove(queue, 1)() -- enable debounce: waiting for off, retry queued
+    c:disable()
+    on = false
+    drain()
+    check(table.concat(got, ",") == "false:superseded", "wait superseded: got " .. table.concat(got, ","))
+    check(table.concat(order, ",") == "off,off", "wait superseded: on never sent, got " .. table.concat(order, ","))
+    check(holds == 0, "wait superseded: holds balanced, got " .. holds)
+end
+
+-- main.lua builds a new controller on every view change, so the switch state
+-- is shared: B joins, supersedes and reports A's switch (decision 2026-10-27).
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local on = false
+    local A = build(false)
+    local B = build(false)
+    fake.status = function() return on end
+    local enables = 0
+    fake.enable = function() enables = enables + 1 end
+    local a, b = {}, {}
+    A:enableWhenDisabled(function(ok) table.insert(a, ok) end)
+    table.remove(queue, 1)() -- debounce fires, enable sent, radio still off
+    check(B:isEnabling() == true, "shared: B sees A's enable in progress")
+    B:enableWhenDisabled(function(ok) table.insert(b, ok) end)
+    on = true
+    drain()
+    check(enables == 1, "shared: one enable sent, got " .. enables)
+    check(#a == 1 and a[1] == true, "shared: A confirmed once, got " .. #a .. " " .. tostring(a[1]))
+    check(#b == 1 and b[1] == true, "shared: B joined and confirmed once, got " .. #b .. " " .. tostring(b[1]))
+    check(holds == 0, "shared: no standby hold left, got " .. holds)
+end
+
+-- A suspend disable() on the new instance supersedes the old one's enable.
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local A = build(false)
+    local B = build(false)
+    local got = {}
+    A:enableWhenDisabled(function(ok, why) table.insert(got, tostring(ok) .. ":" .. tostring(why)) end)
+    B:disable()
+    drain()
+    check(table.concat(got, ",") == "false:superseded", "shared disable: A superseded once, got " .. table.concat(got, ","))
+    check(holds == 0, "shared disable: holds balanced, got " .. holds)
+end
+
+-- A disable sent by the old instance makes the new one's enable wait for the
+-- radio to report off, or "on" races the shutdown (decision 2026-10-27).
+do
+    for len = #queue, 1, -1 do queue[len] = nil end
+    holds = 0
+    local on, order = true, {}
+    local A = build(true)
+    local B = build(true)
+    fake.status = function() return on end
+    fake.disable = function() table.insert(order, "off") end
+    fake.enable = function() table.insert(order, "on"); on = true end
+    A:disable()
+    table.remove(queue, 1)() -- A's debounce: off sent, radio still reads on
+    local got = {}
+    B:enable(function(ok) table.insert(got, ok) end)
+    table.remove(queue, 1)() -- A's stale poll ends
+    table.remove(queue, 1)() -- B's debounce: must wait for off, not send on
+    check(table.concat(order, ",") == "off", "shared disable sent: B waits for off, got " .. table.concat(order, ","))
+    on = false
+    drain()
+    check(table.concat(order, ",") == "off,on", "shared disable sent: on after off, got " .. table.concat(order, ","))
+    check(#got == 1 and got[1] == true, "shared disable sent: B confirmed once, got " .. #got .. " " .. tostring(got[1]))
+    check(holds == 0, "shared disable sent: holds balanced, got " .. holds)
+end
+
+
+do -- Capabilities (decision 2026-10-28): the menu asks the controller.
+    local c = setmetatable({ backend = { capabilities = { trust = true, block = false } } }, { __index = controller })
+    check(c:can("trust") == true, "can: declared feature is true")
+    check(c:can("block") == false, "can: switched-off feature is false")
+    check(c:can("foo") == false, "can: unknown feature is false")
+    c.backend = nil
+    check(c:can("trust") == false, "can: no backend is false, not an error")
+end
+
+
+do -- Kobo MTK and Kindle keep their backend whatever the mode setting (decision 2026-10-28).
+    local Kindle = require("bluetooth/controller/kindle")
+    Kindle.isPrepared = function() return false end
+    for _, case in ipairs({ { "KoboMTK", require("bluetooth/controller/kobo_mtk"):new() }, { "Kindle", Kindle:new() } }) do
+    local kobo = case[2]
+    for _, setting in ipairs({ "auto", "fast", "compatible" }) do
+        local c = setmetatable({ type = case[1], backend = kobo,
+            settings = { getBackendMode = function() return setting end } }, { __index = controller })
+        c:applyMode()
+        check(c.backend == kobo, "Kobo MTK keeps its backend with setting " .. setting)
+        check(c:can("transport") == false, "Kobo MTK hides the mode choice")
+        check(c:activeMode() == "fast", case[1] .. " is always fast, setting " .. setting)
+    end
+    end
+end
+
+
+do -- pairFailedHint: the backend's advice after a failed pairing (decision 2026-10-28).
+    local c = setmetatable({ backend = nil }, { __index = controller })
+    check(c:pairFailedHint() == nil, "hint: none without a backend")
+    c.backend = {}
+    check(c:pairFailedHint() == nil, "hint: none when the backend has no hint")
+    c.backend = { pairFailedHint = function() return "set up first" end }
+    check(c:pairFailedHint() == "set up first", "hint: the backend's text")
 end
 
 if failures > 0 then os.exit(1) end

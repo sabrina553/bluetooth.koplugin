@@ -78,6 +78,12 @@ function BluetoothMenu:new(o)
     return o
 end
 
+--- Fresh device list read: lets the plugin re-apply key bindings to the
+--- remotes now connected (decision 2026-10-28).
+function BluetoothMenu:devicesChanged()
+    if self.on_devices_changed then self.on_devices_changed() end
+end
+
 function BluetoothMenu:addToMainMenu(menu_items)
     menu_items.bluetooth = {
         text = _("Bluetooth"),
@@ -197,8 +203,8 @@ function BluetoothMenu:buildMenuTable()
                     return
                 end
                 local msg
-                -- The tick may come from the cache; toggle() re-checks, so
-                -- check first or the message and the action disagree.
+                -- The tick may come from the cache, so read first or the
+                -- message and the action disagree; toggle() reuses this read.
                 self.controller:status()
                 if self.controller:wantsEnabled() then
                     msg = InfoMessage:new{ text = _("Disabling Bluetooth") }
@@ -225,7 +231,7 @@ function BluetoothMenu:buildMenuTable()
                         })
                     end
                     self:refresh(touchmenu_instance)
-                end)
+                end, true)
             end,
             checked_func = function()
                 return self.controller.is_enabled
@@ -247,6 +253,13 @@ function BluetoothMenu:buildMenuTable()
             separator = true,
         },
     }
+    -- After Settings; only when main.lua passes a KeysMenu (decision 2026-10-28).
+    if self.keys_menu then
+        table.insert(menu, 3, {
+            text = _("Buttons"),
+            sub_item_table_func = function() return self.keys_menu:menuTable() end,
+        })
+    end
     if not self.controller.is_enabled then
         -- Devices below come from the cache; tapping one turns Bluetooth on.
         table.insert(menu, {
@@ -322,9 +335,18 @@ function BluetoothMenu:startPolling()
         UIManager:scheduleIn(MENU_POLL_S, tick)
     end
     self:updateLiveMonitor(token)
-    UIManager:scheduleIn(FIRST_LOOK_S, function()
+    local function firstLook()
         if self._poll_token == token and self:findTouchMenu() then
             seen = true
+        end
+        return seen
+    end
+    -- Our table is shown during the tap that built it, so the next tick
+    -- usually finds the menu; the delayed look covers a slower open
+    -- (decision 2026-10-27).
+    UIManager:nextTick(function()
+        if not firstLook() then
+            UIManager:scheduleIn(FIRST_LOOK_S, firstLook)
         end
     end)
     UIManager:scheduleIn(MENU_POLL_S, tick)
@@ -344,6 +366,7 @@ function BluetoothMenu:checkNow(token)
         local before = self:deviceSignature()
         self.controller:knownDevices(function(fresh)
             if fresh and self._poll_token == token and self:deviceSignature() ~= before then
+                self:devicesChanged()
                 self:refreshMenu()
             end
         end)
@@ -400,6 +423,7 @@ function BluetoothMenu:refresh(touchmenu_instance)
         self.controller:knownDevices(function(fresh)
             if fresh then
                 drew = true
+                self:devicesChanged()
                 self:refreshMenu(touchmenu_instance)
             end
         end)
@@ -496,8 +520,31 @@ function BluetoothMenu:pairedDevices(menu, knownDevices)
     end
 end
 
+--- Drops items for features the backend cannot do (decision 2026-10-28,
+--- vault Docs/Multi-device phase 0 design): each item is either a table or
+--- `false` from ifCan, and a list must not hold holes for ipairs.
+---@param feature string
+---@param item table
+---@return table|false
+function BluetoothMenu:ifCan(feature, item)
+    return self.controller:can(feature) and item
+end
+
+---@param items table
+---@param separator boolean|nil mark the last kept item, as the row's last
+---  button carried the separator before items could be dropped
+---@return table items without the `false` entries
+local function compact(items, separator)
+    local out = {}
+    for i = 1, table.maxn(items) do
+        if items[i] then table.insert(out, items[i]) end
+    end
+    if separator and #out > 0 then out[#out].separator = true end
+    return out
+end
+
 function BluetoothMenu:getSettingsMenu()
-     return {
+     return compact({
         {
             text = _("Disable on Suspend"),
             checked_func = function()
@@ -533,14 +580,14 @@ function BluetoothMenu:getSettingsMenu()
             keep_menu_open = true,
             separator = true,
         },
-        {
+        self:ifCan("transport", {
             text_func = function()
                 local names = { fast = _("Fast"), compatible = _("Compatible") }
                 return T(_("Backend: %1"), names[self.controller:activeMode()])
             end,
             sub_item_table = self:getBackendModeMenu(),
-        },
-        {
+        }),
+        self:ifCan("transport", {
             text = _("Live updates (experimental)"),
             help_text = _("While this menu is open in Fast mode, update it as soon as a device changes instead of every 3 seconds."),
             enabled_func = function()
@@ -555,12 +602,12 @@ function BluetoothMenu:getSettingsMenu()
             end,
             keep_menu_open = true,
             separator = true,
-        },
+        }),
         {
             text = _("About"),
             sub_item_table = self:getAboutMenu(),
         },
-    }
+    })
 end
 
 --- Fast reads over D-Bus, Compatible uses bluetoothctl only; see vault
@@ -644,6 +691,52 @@ function BluetoothMenu:setUpdateChannel(channel, touchmenu_instance)
     touchmenu_instance:updateItems()
 end
 
+--- The scan screen's rows: "Pair by address…" first where the backend can
+--- pair a typed address (Kindle's scan may never list a remote, decision
+--- 2026-10-28), then the unpaired devices.
+function BluetoothMenu:searchItems()
+    local items = buildItemTable(self.controller.known_devices)
+    if self.controller:can("address_pair") then
+        table.insert(items, 1, { text = _("Pair by address…"), address_pair = true })
+    end
+    return items
+end
+
+---@param text string what the user typed
+---@param on_refresh function|nil
+function BluetoothMenu:pairAddress(text, on_refresh)
+    local mac = (text or ""):match("^%s*(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)%s*$")
+    if not mac then
+        UIManager:show(InfoMessage:new{ text = _("Not a Bluetooth address"), timeout = 3 })
+        return
+    end
+    mac = mac:upper()
+    local Devices = require("bluetooth/controller/devices")
+    local dev = Devices:fromScan(mac, mac, self.controller.backend, self.controller)
+    -- Nothing to read about it yet, as with unpaired scan results.
+    dev.skip_info = true
+    self:pairFoundDevice(dev, on_refresh)
+end
+
+function BluetoothMenu:showPairByAddress(on_refresh)
+    local InputDialog = require("ui/widget/inputdialog")
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Pair by address"),
+        input_hint = "XX:XX:XX:XX:XX:XX",
+        buttons = { {
+            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+            { text = _("Pair"), is_enter_default = true, callback = function()
+                local text = dialog:getInputText()
+                UIManager:close(dialog)
+                self:pairAddress(text, on_refresh)
+            end },
+        } },
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
 function BluetoothMenu:showSearchResults(on_refresh)
     local scan_duration = 15
     local poll_interval = 1
@@ -656,8 +749,11 @@ function BluetoothMenu:showSearchResults(on_refresh)
 
     self.search_menu = Menu:new{
         title = _("Searching for devices…"),
-        item_table = buildItemTable(self.controller.known_devices),
+        item_table = self:searchItems(),
         onMenuSelect = function(_, item)
+            if item.address_pair then
+                return self:showPairByAddress(on_refresh)
+            end
             self:pairFoundDevice(item.dev, on_refresh)
         end,
         close_callback = function()
@@ -702,7 +798,7 @@ function BluetoothMenu:showSearchResults(on_refresh)
             local first_on_page = ((menu.page or 1) - 1) * (menu.perpage or 1) + 1
             menu:switchItemTable(
                 done and _("Search complete") or _("Searching for devices…"),
-                buildItemTable(self.controller.known_devices),
+                self:searchItems(),
                 first_on_page
             )
             if not done then
@@ -742,9 +838,13 @@ function BluetoothMenu:pairFoundDevice(dev, on_refresh)
                 table.insert(self.controller.known_devices, dev)
             end
         else
+            -- Kindle's setup advice stays until tapped (decision 2026-10-28).
+            local hint = self.controller:pairFailedHint()
+            local timeout = 2
+            if hint then timeout = nil end
             UIManager:show(InfoMessage:new{
-                text = _("Could not confirm pairing with ") .. displayName(dev),
-                timeout = 2,
+                text = hint or (_("Could not confirm pairing with ") .. displayName(dev)),
+                timeout = timeout,
             })
         end
         if on_refresh then
@@ -758,7 +858,7 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
     dialog = ButtonDialogTitle:new{
         title = dev.name,
         buttons = {
-            {
+            compact({
                 {
                     text = "info",
                     callback = function()
@@ -767,9 +867,10 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
                             text = _("Device: ") .. dev.name .. "\n" ..
                                    _("MAC: ") .. dev.mac .. "\n" ..
                                    _("Paired: ") .. tostring(dev.paired) .. "\n" ..
-                                   _("Connected: ") .. tostring(dev.connected) .. "\n" ..
-                                   _("Trusted: ") .. tostring(dev.trusted) .. "\n" ..
-                                   _("Blocked: ") .. tostring(dev.blocked) ..
+                                   _("Connected: ") .. tostring(dev.connected) ..
+                                   -- Kindle can't manage these, so it would show "nil".
+                                   (self.controller:can("trust") and ("\n" .. _("Trusted: ") .. tostring(dev.trusted)) or "") ..
+                                   (self.controller:can("block") and ("\n" .. _("Blocked: ") .. tostring(dev.blocked)) or "") ..
                                    (dev.held and ("\n" .. _("Stays off on wake until you connect it")) or ""),
 
                         }
@@ -784,23 +885,21 @@ function BluetoothMenu:showDeviceActions(dev, touchmenu_instance)
                         self:performToggle(dev, TOGGLE_ACTIONS.pair, touchmenu_instance)
                     end,
                 },
-                {
+                self:ifCan("trust", {
                     text = dev.trusted and _("Untrust") or _("Trust"),
                     callback = function()
                         UIManager:close(dialog)
                         self:performToggle(dev, TOGGLE_ACTIONS.trust, touchmenu_instance)
                     end,
-                },
-                {
+                }),
+                self:ifCan("block", {
                     text = dev.blocked and _("Unblock") or _("Block"),
                     callback = function()
                         UIManager:close(dialog)
                         self:performToggle(dev, TOGGLE_ACTIONS.block, touchmenu_instance)
                     end,
-                    separator = true,
-                },
-
-            },
+                }),
+            }, true),
             {
                 {
                     text = dev.starred and _("Unstar") or _("Star"),

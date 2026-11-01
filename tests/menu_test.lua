@@ -50,10 +50,14 @@ end
 local function last() return shown[#shown] or {} end
 
 local live = false
+local cannot = {} -- features the stub backend lacks
+local hint -- the stub backend's advice after a failed pairing
 local mode = "fast"
 local menu = BluetoothMenu:new({
     settings = { getLiveUpdates = function() return live end },
-    controller = { activeMode = function() return mode end, is_enabled = true, known_devices = {} },
+    controller = { activeMode = function() return mode end, is_enabled = true, known_devices = {},
+        can = function(_, feature) return not cannot[feature] end,
+        pairFailedHint = function() return hint end },
 })
 menu.refresh = function() end
 
@@ -198,16 +202,19 @@ end
 do
     local UIManager = require("ui/uimanager")
     local logger = require("logger")
-    local saved_schedule, saved_warn = UIManager.scheduleIn, logger.warn
+    local saved_schedule, saved_tick, saved_warn = UIManager.scheduleIn, UIManager.nextTick, logger.warn
     local tasks, warned = {}, 0
     UIManager.scheduleIn = function(_, s, fn) table.insert(tasks, { s = s, fn = fn }) end
+    -- Queued as delay 0, so it sorts before any scheduled task.
+    UIManager.nextTick = function(_, fn) table.insert(tasks, { s = 0, fn = fn, tick = true }) end
+    local function sorted() table.sort(tasks, function(a, b) return a.s < b.s end) end
     UIManager._window_stack = {}
     logger.warn = function() warned = warned + 1 end
     local open = true
     menu.findTouchMenu = function() return open end
     menu.checkNow = function() end
     menu:startPolling()
-    table.sort(tasks, function(a, b) return a.s < b.s end)
+    sorted()
     tasks[1].fn() -- first look, menu open
     open = false  -- closed before the first poll
     tasks[2].fn() -- first poll
@@ -215,10 +222,23 @@ do
     -- Never found at all: that one still warns.
     tasks, warned, open = {}, 0, false
     menu:startPolling()
-    table.sort(tasks, function(a, b) return a.s < b.s end)
-    tasks[1].fn(); tasks[2].fn()
+    while #tasks > 0 do sorted(); table.remove(tasks, 1).fn() end
     check("never found: WARN kept", warned, 1)
-    UIManager.scheduleIn, logger.warn = saved_schedule, saved_warn
+    -- The first look runs on the next tick; missed there, the delayed retry
+    -- still finds a slow-opening menu (decision 2026-10-27).
+    tasks, warned, open = {}, 0, false
+    menu:startPolling()
+    sorted()
+    check("first look: on the next tick", tasks[1].tick, true)
+    if tasks[1].tick then
+        tasks[1].fn() -- not there yet
+        sorted()
+        check("first look: retried later", #tasks, 3)
+        open = true; tasks[2].fn() -- the retry finds it
+        open = false; tasks[3].fn() -- closed before the first poll
+        check("first look: retry counts as seen", warned, 0)
+    end
+    UIManager.scheduleIn, UIManager.nextTick, logger.warn = saved_schedule, saved_tick, saved_warn
     menu.findTouchMenu, menu.checkNow = nil, nil
 end
 
@@ -240,6 +260,112 @@ do
     switching = false
     item.callback(nil)
     check("done switching: a tap toggles", toggles, 1)
+end
+
+-- One tap reads the radio status once: each read is a blocking shell-out
+-- on PocketBook (decision 2026-10-27). Uses the real toggle().
+do
+    shown = {}
+    package.preload["device"] = function() return { model = "test" } end
+    local Controller = require("bluetooth/controller/controller")
+    local reads, sent = 0, nil
+    menu.controller.isUserSwitching = function() return false end
+    menu.controller.status = function(self) reads = reads + 1; self.is_enabled = false end
+    menu.controller.wantsEnabled = Controller.wantsEnabled
+    menu.controller.isEnabling = Controller.isEnabling
+    menu.controller.isDisabling = Controller.isDisabling
+    menu.controller.toggle = Controller.toggle
+    menu.controller.enable = function() sent = "on" end
+    menu.controller.disable = function() sent = "off" end
+    menu:buildMenuTable()[1].callback(nil)
+    check("one tap: status reads", reads, 1)
+    check("one tap: enables", sent, "on")
+    check("one tap: message", last().text, "Enabling Bluetooth")
+end
+
+-- Buttons sits after Settings once main.lua passes a KeysMenu.
+do
+    check("buttons: absent without a KeysMenu", menu:buildMenuTable()[3].text, "Scan")
+    menu.keys_menu = { menuTable = function() return { "x" } end }
+    local item = menu:buildMenuTable()[3]
+    check("buttons: after Settings", item.text, "Buttons")
+    check("buttons: opens the KeysMenu", item.sub_item_table_func()[1], "x")
+    menu.keys_menu = nil
+end
+
+do -- Capabilities (decision 2026-10-28): items a backend can't do are omitted.
+    local function texts(row)
+        local out = {}
+        for _, b in ipairs(row) do table.insert(out, b.text_func and "Backend" or b.text) end
+        return table.concat(out, ",")
+    end
+    local dev = { name = "Pad", mac = "XX:XX", paired = true }
+    menu:showDeviceActions(dev)
+    check("caps: full row", texts(last().buttons[1]), "info,Unpair,Trust,Block")
+    check("caps: separator on the row's last", last().buttons[1][4].separator, true)
+    cannot = { trust = true, block = true }
+    menu:showDeviceActions(dev)
+    check("caps: no trust or block", texts(last().buttons[1]), "info,Unpair")
+    check("caps: separator moves to the last kept", last().buttons[1][2].separator, true)
+    cannot = { block = true }
+    menu:showDeviceActions(dev)
+    check("caps: trust only", texts(last().buttons[1]), "info,Unpair,Trust")
+
+    -- The info box leaves out what the backend can't manage (Kindle showed "nil").
+    last().buttons[1][1].callback()
+    check("caps: info shows Trusted", last().text:find("Trusted:", 1, true) ~= nil, true)
+    check("caps: info leaves out Blocked", last().text:find("Blocked:", 1, true), nil)
+
+    local function has(items, label)
+        for _, item in ipairs(items) do
+            if (item.text_func and "Backend" or item.text) == label then return true end
+        end
+        return false
+    end
+    cannot = {}
+    local settings = menu:getSettingsMenu()
+    check("caps: Backend shown", has(settings, "Backend"), true)
+    check("caps: Live updates shown", has(settings, "Live updates (experimental)"), true)
+    cannot = { transport = true }
+    settings = menu:getSettingsMenu()
+    check("caps: Backend hidden", has(settings, "Backend"), false)
+    check("caps: Live updates hidden", has(settings, "Live updates (experimental)"), false)
+    check("caps: About still last", settings[#settings].text, "About")
+    cannot = {}
+end
+
+do -- Kindle (decision 2026-10-28): setup hint after a failed pairing, pair by address.
+    local dev = { mac = "00:11:22:33:44:55", name = "Pager", paired = false,
+        pair = function(_, cb) cb(false) end }
+    hint = nil
+    shown = {}
+    menu:pairFoundDevice(dev)
+    check("no hint: short failure message", last().timeout, 2)
+    hint = "Remotes need a one-time setup"
+    shown = {}
+    menu:pairFoundDevice(dev)
+    check("hint: shown", last().text, hint)
+    check("hint: stays until tapped", last().timeout, nil)
+    hint = nil
+
+    cannot = { address_pair = true }
+    local items = menu:searchItems()
+    check("address pair: absent without the capability", items[1] and items[1].address_pair, nil)
+    cannot = {}
+    items = menu:searchItems()
+    check("address pair: first item with the capability", items[1] and items[1].address_pair, true)
+
+    local paired_with
+    local saved = menu.pairFoundDevice
+    menu.pairFoundDevice = function(_, d) paired_with = d end
+    shown = {}
+    menu:pairAddress("not an address")
+    check("address pair: bad address refused", paired_with, nil)
+    check("address pair: says why", last().text, "Not a Bluetooth address")
+    menu:pairAddress(" 00:11:22:33:44:aa ")
+    check("address pair: valid address paired", paired_with and paired_with.mac, "00:11:22:33:44:AA")
+    check("address pair: no per-device info reads", paired_with and paired_with.skip_info, true)
+    menu.pairFoundDevice = saved
 end
 
 if failures > 0 then

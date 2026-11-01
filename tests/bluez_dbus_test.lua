@@ -258,6 +258,25 @@ do
     BluezDbus.reset()
 end
 
+do -- A subclass can switch the bluetoothctl fallback off (Kobo has none, decision 2026-10-28).
+    local NoFallback = setmetatable({}, { __index = BluezDbus })
+    NoFallback.__index = NoFallback
+    function NoFallback:fallenBack() return false end
+    function NoFallback:shouldFallBack() return false end
+    local backend = setmetatable({}, NoFallback)
+    fake({ ["Properties.Get"] = ACCESS_DENIED, ["GetManagedObjects"] = ACCESS_DENIED })
+    check("no fallback: status reads off", backend:status(), false)
+    check("no fallback: devices read fails", backend:knownDevices(), nil)
+    check("no fallback: no bluetoothctl", ranBluetoothctl(), false)
+    check("no fallback: shared flag untouched", BluezDbus.broken, nil)
+    BluezDbus.broken = "test"
+    fake({ ["Properties.Get"] = HEADER .. "   variant       boolean true\n" })
+    BluezDbus.broken = "test"
+    check("no fallback: ignores another backend's broken flag", backend:status(), true)
+    check("no fallback: still no bluetoothctl", ranBluetoothctl(), false)
+    BluezDbus.reset()
+end
+
 if failures > 0 then
     print(failures .. " failure(s)")
     os.exit(1)
