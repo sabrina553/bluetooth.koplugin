@@ -88,6 +88,11 @@ function Bluetooth:init()
 
     Capture.ensureHook(Device.input)
     self:applyKeys()
+    -- Each view builds a new controller with no devices yet, so the first
+    -- applyKeys finds no remote; apply again once the first read lands.
+    self.controller:knownDevices(function(fresh)
+        if fresh then self:applyKeys() end
+    end)
 
     if Session.isColdStart() then
         local was_on = self.settings:getRadioWasOn()

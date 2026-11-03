@@ -52,7 +52,9 @@ package.preload["bluetooth/controller/backend_select"] = function()
 end
 
 local remote = { name = "Kobo Remote", connected = true }
-local shared_controller = { known_devices = { remote } }
+local read_waiter
+local shared_controller = { known_devices = { remote },
+    knownDevices = function(_, cb) read_waiter = cb end }
 package.preload["bluetooth/controller/controller"] = function()
     return { new = function() return shared_controller end }
 end
@@ -157,6 +159,19 @@ check(event_map[108] == "LPgFwd", "file browser instance restores the name")
 old:applyKeys()
 check(event_map[108] == "LPgFwd", "closed instance's stale callback does not apply its map")
 check(cur.key_events.BTKey108 == nil and old.closed == true, "closed instance marked")
+
+-- A view change starts with no devices; the binding lands when the first read does.
+bindings["Kobo Remote"] = { { code = 108, screens = { reader = true, filemanager = true },
+    action = { kind = "key", name = "Down" } } }
+local saved_devices = shared_controller.known_devices
+shared_controller.known_devices = {}
+read_waiter = nil
+newPlugin()
+check(event_map[108] == "LPgFwd", "no binding before the first read")
+shared_controller.known_devices = saved_devices
+check(read_waiter ~= nil, "init waits for the first device read")
+if read_waiter then read_waiter(true) end
+check(event_map[108] == "Down", "first device read applies the binding")
 
 -- onKeyPress before any applyKeys must hand the matcher a table.
 local bare = setmetatable({}, { __index = Bluetooth })
