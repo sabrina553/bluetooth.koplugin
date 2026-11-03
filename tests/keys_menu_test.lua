@@ -297,6 +297,73 @@ do
     check(store:count("set") == 0, "back: closed with nothing chosen")
 end
 
+-- Back at every step returns to the step before (decision 2026-11-03).
+do
+    local m, store = setup({ { name = "A", connected = true }, { name = "B", connected = true } })
+    local entry = m:menuTable()[1]
+    check(entry.keep_menu_open == true, "back: Bind keeps the Buttons menu open")
+    m:startBind()
+    listening(108)
+    check(press("Cancel"), "back: first step offers Cancel")
+    m:startBind()
+    listening(108)
+    press("B")
+    check(press("« Back") and lastText() == "Which remote?", "back: screen -> remote")
+    press("B")
+    press("Reader")
+    check(press("« Back") and lastText() == "Use it on which screen?", "back: action type -> screen")
+    press("Reader")
+    press("Keys")
+    check(press("« Back") and lastText() == "Choose an action", "back: keys -> action type")
+    press("All actions…")
+    local picker = last()
+    picker.item_table_stack = {}
+    picker:onClose()
+    check(lastText() == "Choose an action", "back: empty Dispatcher picker -> action type")
+    press("Keys")
+    press("Page back")
+    local c = store:find("set")
+    check(c and c[2] == "B" and c[3].screens.reader and not c[3].screens.filemanager, "back: still saves after going back")
+end
+
+-- One remote: the screen step comes first, so it offers Cancel.
+do
+    local m = setup({ { name = "Remote", connected = true } })
+    m:startBind()
+    listening(108)
+    check(press("Cancel"), "back: one remote, screen step offers Cancel")
+end
+
+-- An outside binding: Back from the screen step reopens the warning.
+do
+    local m = setup({ { name = "Remote", connected = true } })
+    event_map[108] = "LPgFwd"
+    m:startBind()
+    listening(108)
+    press("Yes")
+    check(press("« Back") and lastText():find("already works as", 1, true) ~= nil, "back: screen -> outside warning")
+end
+
+-- Editing: Back reaches the edit dialog, and a removal redraws the open list.
+do
+    local data = { Remote = { { code = 108, screens = { reader = true, filemanager = true }, action = { kind = "key", name = "LPgFwd" } } } }
+    local m, store = setup({ { name = "Remote", connected = true } }, data)
+    local row = m:menuTable()[2].sub_item_table_func()[1]
+    check(row.keep_menu_open == true, "edit: list stays open")
+    local redrawn = 0
+    local touchmenu = { updateItems = function() redrawn = redrawn + 1 end }
+    row.callback(touchmenu)
+    press("Change action")
+    press("Only here")
+    check(press("« Back") and lastText() == "Change on both screens, or only here?", "edit: action type -> scope")
+    check(press("« Back") and lastText():find("button 108", 1, true) ~= nil, "edit: scope -> edit dialog")
+    press("Remove")
+    check(press("« Back") and lastText():find("button 108", 1, true) ~= nil, "edit: remove scope -> edit dialog")
+    press("Remove")
+    press("Both screens")
+    check(redrawn == 1 and touchmenu.item_table ~= nil, "edit: list redrawn after removing")
+end
+
 if failures > 0 then
     print(failures .. " failure(s)")
     os.exit(1)

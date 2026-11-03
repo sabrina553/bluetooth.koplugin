@@ -30,7 +30,9 @@ local function message(text)
 end
 
 --- A dialog of one-button rows; each choice closes it and calls `fn(value)`.
-local function choose(title, choices, fn)
+--- With `on_back` the last row goes back a step, else Cancel. Its label
+--- differs from the "Back" key action listed in the same dialogs.
+local function choose(title, choices, fn, on_back)
     local dialog
     local rows = {}
     for _i, c in ipairs(choices) do
@@ -42,7 +44,13 @@ local function choose(title, choices, fn)
             end,
         } }
     end
-    rows[#rows + 1] = { { text = _("Cancel"), callback = function() UIManager:close(dialog) end } }
+    rows[#rows + 1] = { {
+        text = on_back and _("« Back") or _("Cancel"),
+        callback = function()
+            UIManager:close(dialog)
+            if on_back then on_back() end
+        end,
+    } }
     dialog = ButtonDialog:new{ title = title, buttons = rows }
     UIManager:show(dialog)
 end
@@ -76,7 +84,7 @@ end
 --- (MIT, Copyright (c) titandrive), see CREDITS.md. Only the TouchMenu-style
 --- select handling is kept: plain Menu calls callback() without a TouchMenu
 --- and ignores sub_item_table_func.
-function KeysMenu:pickDispatcher(screen, done)
+function KeysMenu:pickDispatcher(screen, done, on_back)
     local Menu = require("ui/widget/menu")
     local Device = require("device")
     local Dispatcher = require("dispatcher")
@@ -101,6 +109,8 @@ function KeysMenu:pickDispatcher(screen, done)
         UIManager:close(picker)
         if next(location.actions) then
             done({ kind = "dispatcher", actions = copy(location.actions) })
+        elseif on_back then
+            on_back()
         end
     end
     picker = Menu:new{
@@ -146,13 +156,14 @@ function KeysMenu:pickDispatcher(screen, done)
 end
 
 --- Action choice for `scope` ("reader", "filemanager" or "both").
-function KeysMenu:pickAction(scope, done)
+function KeysMenu:pickAction(scope, done, on_back)
+    local choose_kind
     local function keys()
         local list = {}
         for _i, k in ipairs(Actions.keys()) do
             list[#list + 1] = { text = k.text, value = { kind = "key", name = k.name } }
         end
-        choose(_("Keys"), list, done)
+        choose(_("Keys"), list, done, choose_kind)
     end
     local function common()
         local entries = scope == "both" and Actions.forBoth() or Actions.common(scope)
@@ -160,14 +171,26 @@ function KeysMenu:pickAction(scope, done)
         for _i, e in ipairs(entries) do
             list[#list + 1] = { text = e.text, value = { kind = "dispatcher", actions = copy(e.actions) } }
         end
-        choose(_("Common"), list, done)
+        choose(_("Common"), list, done, choose_kind)
     end
     local choices = { { text = _("Keys"), value = keys }, { text = _("Common"), value = common } }
     -- Both screens: only actions valid on both, so no dead binding.
     if scope ~= "both" then
-        choices[#choices + 1] = { text = _("All actions…"), value = function() self:pickDispatcher(scope, done) end }
+        choices[#choices + 1] = { text = _("All actions…"), value = function() self:pickDispatcher(scope, done, choose_kind) end }
     end
-    choose(_("Choose an action"), choices, function(fn) fn() end)
+    choose_kind = function() choose(_("Choose an action"), choices, function(fn) fn() end, on_back) end
+    choose_kind()
+end
+
+--- Re-applies the bindings and redraws an open binding list, which would
+--- otherwise still show the old row.
+function KeysMenu:changed()
+    self.on_change()
+    local list = self._list
+    if list and list.menu and list.menu.updateItems then
+        list.menu.item_table = self:bindingRows(list.screen)
+        list.menu:updateItems()
+    end
 end
 
 function KeysMenu:findBinding(remote, code, screen)
@@ -195,7 +218,7 @@ function KeysMenu:save(remote, code, scope, action)
         end
         self.store:set(remote, { code = code, screens = copy(BOTH), action = action })
     end
-    self.on_change()
+    self:changed()
 end
 
 function KeysMenu:startBind()
@@ -217,32 +240,45 @@ function KeysMenu:startBind()
 end
 
 function KeysMenu:afterPress(remotes, code)
-    local function pickScope(remote)
+    local outside = Keymap.outsideName(self:eventMap(), code)
+    local confirmOutside, pickRemote, pickScope
+    -- Back from the first step after the press has nowhere to go: the press
+    -- itself can't be replayed, and the Buttons menu is still open below.
+    local before_remote = outside and function() confirmOutside() end or nil
+    local function before_scope()
+        if #remotes > 1 then return pickRemote end
+        return before_remote
+    end
+    pickScope = function(remote)
         choose(_("Use it on which screen?"), {
             { text = _("Reader"), value = "reader" },
             { text = _("File browser"), value = "filemanager" },
             { text = _("Both"), value = "both" },
         }, function(scope)
-            self:pickAction(scope, function(action) self:save(remote, code, scope, action) end)
-        end)
+            self:pickAction(scope, function(action) self:save(remote, code, scope, action) end,
+                function() pickScope(remote) end)
+        end, before_scope())
     end
-    local function pickRemote()
+    pickRemote = function()
         if #remotes == 1 then return pickScope(remotes[1]) end
         local list = {}
         for _i, name in ipairs(remotes) do list[#list + 1] = { text = name, value = name } end
-        choose(_("Which remote?"), list, pickScope)
+        choose(_("Which remote?"), list, pickScope, before_remote)
     end
-    local outside = Keymap.outsideName(self:eventMap(), code)
-    if outside then
+    confirmOutside = function()
         choose(T(_("This button already works as %1 (set outside this plugin). Bind it here anyway?"), outside),
             { { text = _("Yes"), value = true }, { text = _("No"), value = false } },
             function(yes) if yes then pickRemote() end end)
+    end
+    if outside then
+        confirmOutside()
     else
         pickRemote()
     end
 end
 
-function KeysMenu:changeBinding(remote, b, screen)
+function KeysMenu:changeBinding(remote, b, screen, on_back)
+    local pickScope
     local function pick(scope)
         self:pickAction(scope, function(action)
             if scope == "both" then
@@ -252,39 +288,43 @@ function KeysMenu:changeBinding(remote, b, screen)
             else
                 self.store:set(remote, { code = b.code, screens = { [screen] = true }, action = action })
             end
-            self.on_change()
-        end)
+            self:changed()
+        end, pickScope or on_back)
     end
     if isLinked(b) then
-        choose(_("Change on both screens, or only here?"), {
-            { text = _("Both screens"), value = "both" },
-            { text = _("Only here"), value = screen },
-        }, pick)
+        pickScope = function()
+            choose(_("Change on both screens, or only here?"), {
+                { text = _("Both screens"), value = "both" },
+                { text = _("Only here"), value = screen },
+            }, pick, on_back)
+        end
+        pickScope()
     else
         pick(screen)
     end
 end
 
-function KeysMenu:removeBinding(remote, b, screen)
+function KeysMenu:removeBinding(remote, b, screen, on_back)
     local function remove(scope)
         local screens = scope == "both" and { "reader", "filemanager" } or { scope }
         for _i, s in ipairs(screens) do self.store:remove(remote, b.code, s) end
-        self.on_change()
+        self:changed()
     end
     if isLinked(b) then
         choose(_("Remove from both screens, or only here?"), {
             { text = _("Both screens"), value = "both" },
             { text = _("Only here"), value = screen },
-        }, remove)
+        }, remove, on_back)
     else
         remove(screen)
     end
 end
 
 function KeysMenu:editBinding(remote, b, screen)
+    local function again() self:editBinding(remote, b, screen) end
     choose(T(_("%1: button %2"), remote, b.code), {
-        { text = _("Change action"), value = function() self:changeBinding(remote, b, screen) end },
-        { text = _("Remove"), value = function() self:removeBinding(remote, b, screen) end },
+        { text = _("Change action"), value = function() self:changeBinding(remote, b, screen, again) end },
+        { text = _("Remove"), value = function() self:removeBinding(remote, b, screen, again) end },
     }, function(fn) fn() end)
 end
 
@@ -301,7 +341,12 @@ function KeysMenu:bindingRows(screen)
                 if not connected[remote] then text = text .. " " .. _("(not connected)") end
                 rows[#rows + 1] = {
                     text = text,
-                    callback = function() self:editBinding(remote, b, screen) end,
+                    -- Cancel and Back land on this list, so it stays open.
+                    keep_menu_open = true,
+                    callback = function(touchmenu)
+                        self._list = { menu = touchmenu, screen = screen }
+                        self:editBinding(remote, b, screen)
+                    end,
                 }
             end
         end
@@ -314,6 +359,8 @@ function KeysMenu:menuTable()
     return {
         {
             text = _("Bind a button…"),
+            -- Cancel on the first step returns to this menu.
+            keep_menu_open = true,
             callback = function() self:startBind() end,
             separator = true,
         },
