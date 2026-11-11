@@ -157,6 +157,44 @@ check(#scheduled == 1, "scan: one stop timer, got " .. #scheduled)
 runScheduled()
 check(writes[#writes] == "DiscoverA2DP=0", "scan: discovery off when the timer fires")
 
+-- BLE: ace_bt_cli's scan output (PW 5.17.1 shape, made-up addresses). HID is
+-- the 0x1812 service or a HID appearance; the name can come in a later line.
+local LE_OUTPUT = table.concat({
+    "ACEBTCLI Beacon Client Registered Success",
+    ">: ACEBTCLI bdaddr: 00:11:22:33:44:01 addr_type: 0 rssi: -50 payload_len: 7 flags: 06 uuid 0: 1812",
+    "ACEBTCLI payload: 02 01 06 03 03 12 18 ",
+    "ACEBTCLI bdaddr: 00:11:22:33:44:02 addr_type: 0 rssi: -60 payload_len: 13 flags: 05 name: Speaker",
+    "ACEBTCLI payload: 02 01 05 03 03 be fe 08 09 53 70 65 61 6b 65 72 ",
+    "ACEBTCLI bdaddr: 00:11:22:33:44:01 addr_type: 0 rssi: -51 payload_len: 6 name: Pad",
+    "ACEBTCLI payload: 04 09 50 61 64 ",
+    "ACEBTCLI bdaddr: aa:11:22:33:44:03 addr_type: 1 rssi: -70 payload_len: 7",
+    "ACEBTCLI payload: 02 01 06 03 19 c1 03 ",
+    "ACEBTCLI payload: 03 03 12 18 ",
+}, "\n")
+local le = Kindle.parseLeScan(LE_OUTPUT)
+check(#le == 2, "le: only HID devices, got " .. #le)
+check(le[1].mac == "00:11:22:33:44:01" and le[1].name == "Pad", "le: service 0x1812, name from a later line")
+check(le[2].mac == "AA:11:22:33:44:03" and le[2].name == le[2].mac, "le: HID appearance, address as the name")
+check(#Kindle.parseLeScan(nil) == 0 and #Kindle.parseLeScan("payload: 05 09") == 0, "le: nothing from no or cut-off output")
+
+-- The BLE scan only runs on a Kindle set up for remotes, and its devices
+-- join the known list without doubling a paired one.
+fakeLipc()
+scripts, async_reply = {}, LE_OUTPUT
+kindle:search(5)
+check(#scripts == 0 and Kindle.le_found == nil, "le: no scan on an unprepared Kindle")
+prepared = true
+kindle:search(5)
+check(#scripts == 1 and scripts[1]:find("registerbeacon", 1, true) ~= nil, "le: scan registers a beacon client")
+check(scripts[1]:find("Registered Success", 1, true) < scripts[1]:find("startdefbeaconscan", 1, true),
+    "le: scan starts only after the registration is seen")
+hashes.ListPaired = { { address = "00:11:22:33:44:01", name = "Pad" } }
+local known = kindle:knownDevices()
+check(#known == 2, "le: merged by address, got " .. #known)
+check(known[1].paired == true and known[2].mac == "AA:11:22:33:44:03", "le: paired entry kept, new one appended")
+Kindle.le_found = nil
+prepared = false
+
 -- Pairing on a prepared Kindle: ace_bt_cli, success when the address is paired.
 local result
 prepared = true

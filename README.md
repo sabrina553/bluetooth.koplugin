@@ -68,7 +68,7 @@ The setup is described in [kindlebtcontroller.koplugin's README](https://github.
 
 - It is verified on the Kindle Paperwhite 5 and 6.
 - **Don't** try it on older models such as the Oasis 1 or Paperwhite 3: they can end up on a white screen that needs recovery.
-- Only classic Bluetooth remotes work; Bluetooth Low Energy (BLE) ones don't.
+- Classic and Bluetooth Low Energy (BLE) remotes both work. BLE is verified with an Xbox Series controller on firmware 5.17.1.
 
 ## Updating
 

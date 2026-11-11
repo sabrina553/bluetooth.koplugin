@@ -17,6 +17,25 @@ local LIPC_TIMEOUT_S = 2
 local DEFAULT_SCAN_S = 15
 local PAIR_TIMEOUT_S = 30
 local PAIR_POLL_S = 2
+local LE_SCAN_S = 8
+-- Scans only once the beacon client is registered: a scan requested without
+-- one is queued under a dead session and then never stops, through radio
+-- off/on, until btmanagerd restarts (PW 5.17.1, 2026-11-11). Must end
+-- inside Bluez.runAsync's own 20 s.
+local LE_SCAN_SCRIPT = ([[
+d=$(mktemp -d) && mkfifo "$d/in" || exit 1
+timeout 18 ace_bt_cli < "$d/in" > "$d/out" 2>&1 &
+exec 3> "$d/in"
+echo "ble regble" >&3; sleep 1
+echo "ble registerbeacon" >&3; sleep 2
+if grep -q "Beacon Client Registered Success" "$d/out"; then
+    echo "ble startdefbeaconscan" >&3; sleep %d
+    echo "ble stopbeaconscan" >&3; sleep 1
+fi
+echo exit >&3; exec 3>&-
+wait
+cat "$d/out"; rm -rf "$d"
+]]):format(LE_SCAN_S)
 -- finlater's setup guide creates these; both present means remotes can pair.
 local UDEV_RULE = "/etc/udev/rules.d/99-bt-keyboard.rules"
 
@@ -171,6 +190,53 @@ function Kindle:mergeList(prop, by_mac, order, flag)
     return true
 end
 
+--- BLE HID devices in ace_bt_cli's beacon scan output, which prints each
+--- advertisement as a `bdaddr:` line and a `payload:` line of hex bytes.
+--- HID is the 0x1812 service or a 0x03C0-0x03C4 appearance; the name often
+--- comes in a separate scan response, so entries merge by address.
+---@param text string|nil
+---@return table[] `{ mac, name }`
+function Kindle.parseLeScan(text)
+    local by_mac, order, mac = {}, {}, nil
+    for line in (text or ""):gmatch("[^\n]+") do
+        local addr = line:match("bdaddr: (%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)")
+        local payload = line:match("payload: ([%x ]+)")
+        if addr then
+            mac = addr:upper()
+        elseif payload and mac then
+            local bytes = {}
+            for hex in payload:gmatch("%x%x") do bytes[#bytes + 1] = tonumber(hex, 16) end
+            local dev = by_mac[mac] or {}
+            local i = 1
+            while i < #bytes and bytes[i] > 0 do
+                local len, kind = bytes[i], bytes[i + 1]
+                local last = math.min(i + len, #bytes)
+                if kind == 0x19 and bytes[i + 3] == 0x03 and bytes[i + 2] >= 0xC0 and bytes[i + 2] <= 0xC4 then
+                    dev.hid = true
+                elseif kind == 0x02 or kind == 0x03 then
+                    for j = i + 2, last - 1, 2 do
+                        if bytes[j] == 0x12 and bytes[j + 1] == 0x18 then dev.hid = true end
+                    end
+                elseif kind == 0x08 or kind == 0x09 then
+                    dev.name = string.char(unpack(bytes, i + 2, last))
+                end
+                i = i + len + 1
+            end
+            if not by_mac[mac] and next(dev) then
+                dev.mac = mac
+                by_mac[mac] = dev
+                order[#order + 1] = dev
+            end
+            mac = nil
+        end
+    end
+    local found = {}
+    for _, dev in ipairs(order) do
+        if dev.hid then found[#found + 1] = { mac = dev.mac, name = dev.name or dev.mac } end
+    end
+    return found
+end
+
 --- Paired, connected and discovered lists merged by address; nil on a failed read.
 function Kindle:knownDevices()
     local by_mac, order = {}, {}
@@ -178,6 +244,14 @@ function Kindle:knownDevices()
             and self:mergeList("ListConnected", by_mac, order, "connected")
             and self:mergeList("ListDiscovered", by_mac, order, nil)) then
         return nil
+    end
+    for _, le in ipairs(Kindle.le_found or {}) do
+        if not by_mac[le.mac] then
+            local dev = Devices:fromScan(le.mac, le.name, self, self.controller)
+            dev.skip_info = true
+            by_mac[le.mac] = dev
+            table.insert(order, dev)
+        end
     end
     logger.dbg("Kindle: Found " .. #order .. " known devices")
     KoboInput.onDevices(order, Bluez.capture)
@@ -229,7 +303,10 @@ end
 function Kindle:disconnect(mac) self:action("Disconnect", mac) end
 function Kindle:unpair(mac) self:action("Unbond", mac) end
 
---- A2DP discovery: Kindle's own scan, built for headphones.
+--- A2DP discovery: Kindle's own scan, built for headphones. On a Kindle set
+--- up for remotes, a BLE scan for HID devices alongside it: the stock stack
+--- pairs them over LE with the same `pair` as classic ones and creates the
+--- input device (Xbox Series controller, PW 5.17.1, 2026-11-11).
 function Kindle:search(duration)
     duration = duration or DEFAULT_SCAN_S
     local UIManager = require("ui/uimanager")
@@ -240,6 +317,14 @@ function Kindle:search(duration)
         Kindle.lipc.setInt("DiscoverA2DP", 0)
     end
     UIManager:scheduleIn(duration, Kindle.scan_timer)
+    if Kindle.isPrepared() and not Kindle.le_scanning then
+        Kindle.le_scanning = true
+        Bluez.runAsync(LE_SCAN_SCRIPT, function(text)
+            Kindle.le_scanning = nil
+            Kindle.le_found = Kindle.parseLeScan(text)
+            logger.info("Kindle: BLE HID devices:", #Kindle.le_found)
+        end)
+    end
 end
 
 --- ace_bt_cli on a Kindle set up for remotes, Bond (headphones) otherwise.
