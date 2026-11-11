@@ -64,6 +64,40 @@ KoboInput.openNew(input, {})
 KoboInput.openNew(input, found)
 check(#opened == 2, "reopen: a returning node is opened again, got " .. #opened)
 
+-- Everything disconnected: no scan runs, so the read itself forgets what was
+-- opened and the same eventN is opened again once the remote is back.
+KoboInput._reset()
+opened = {}
+local later = {}
+package.loaded["ui/uimanager"] = { scheduleIn = function(_, _, fn) table.insert(later, fn) end }
+package.loaded["device"] = { input = input }
+local function capture() return LISTING end
+local function read(connected)
+    KoboInput.onDevices({ { mac = "00:11:22:33:44:55", connected = connected } }, capture)
+    for _, fn in ipairs(later) do fn() end
+    later = {}
+end
+read(true)
+read(false)
+read(true)
+check(#opened == 2, "reconnect: opened again after a disconnect, got " .. #opened)
+
+-- KOReader still maps the path to the dead fd and would skip the open.
+KoboInput._reset()
+local calls = {}
+local stale = {
+    opened_devices = { ["/dev/input/event4"] = 24 },
+    close = function(self, path) self.opened_devices[path] = nil; table.insert(calls, "close") end,
+    open = function() table.insert(calls, "open") end,
+}
+KoboInput.openNew(stale, found)
+check(table.concat(calls, ",") == "close,open", "stale: closed before opening, got " .. table.concat(calls, ","))
+calls = {}
+stale.opened_devices = {}
+KoboInput._reset()
+KoboInput.openNew(stale, found)
+check(table.concat(calls, ",") == "open", "stale: nothing to close for an unknown path")
+
 if failures > 0 then
     os.exit(1)
 end

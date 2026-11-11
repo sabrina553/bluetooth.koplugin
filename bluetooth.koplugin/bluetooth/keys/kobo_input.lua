@@ -60,6 +60,11 @@ function KoboInput.openNew(input, devices)
     for _, dev in ipairs(devices) do
         if not opened[dev.path] then
             opened[dev.path] = true
+            -- KOReader keeps the dead fd of a remote that went away under
+            -- this path and would skip the open; closing clears it.
+            if type(input.close) == "function" and (input.opened_devices or {})[dev.path] then
+                pcall(input.close, input, dev.path)
+            end
             local ok, err = pcall(input.open, input, dev.path)
             if ok then
                 logger.info("KoboInput: opened", dev.path)
@@ -97,7 +102,14 @@ function KoboInput.onDevices(devices, capture)
     local key = table.concat(connected, ",")
     if key ~= (KoboInput.connected_key or "") then
         KoboInput.connected_key = key
-        if key ~= "" then KoboInput.openLater(capture) end
+        if key ~= "" then
+            KoboInput.openLater(capture)
+        else
+            -- Nothing scans while nothing is connected, so openNew never
+            -- sees the node gone: forget here, or the same eventN is
+            -- skipped when the remote comes back (PW 5.17.1, 2026-11-11).
+            opened = {}
+        end
     end
 end
 
