@@ -43,10 +43,12 @@ local MAC = "00:11:22:33:44:55"
 local OTHER = "66:77:88:99:AA:BB"
 
 -- A fake lipc: ints and hashes answer from tables, every write is recorded.
-local writes, ints, hashes, fail_hash
+local writes, ints, hashes, fail_hash, enable_ok
 local function fakeLipc()
     writes, ints, hashes, fail_hash, logs, scheduled = {}, {}, {}, false, {}, {}
+    enable_ok = true
     Kindle.lipc = {
+        enable = function() table.insert(writes, "BTenable=1:1") return enable_ok end,
         getInt = function(prop) return ints[prop] end,
         setInt = function(prop, n) table.insert(writes, prop .. "=" .. n) return true end,
         setString = function(prop, s) table.insert(writes, prop .. "=" .. s) return true end,
@@ -98,11 +100,16 @@ check(kindle:status() == false, "status: BTstate 0 is off")
 ints.BTstate = nil
 check(kindle:status() == false, "status: no answer reads off")
 
--- Power through flight mode: 0 is radio on.
+-- On through BTenable: flight mode 0 does nothing after a suspend dropped
+-- the radio. Off through flight mode.
 fakeLipc()
 kindle:enable()
 kindle:disable()
-check(writes[1] == "BTflightMode=0" and writes[2] == "BTflightMode=1", "power: flight mode 0 on, 1 off")
+check(#writes == 2 and writes[1] == "BTenable=1:1" and writes[2] == "BTflightMode=1", "power: BTenable on, flight mode 1 off")
+fakeLipc()
+enable_ok = false
+kindle:enable()
+check(writes[2] == "BTflightMode=0", "power: flight mode 0 when BTenable fails")
 
 -- Lists: merged by address, flags from each list, name falls back to the address.
 fakeLipc()
@@ -234,6 +241,9 @@ check(real_lipc.setString("Connect", "00:11:22:33:44:55; reboot") == false, "lip
 check(#executed == 0, "lipc: nothing run for a non-MAC")
 real_lipc.setString("Connect", MAC)
 check(#executed == 1 and executed[1]:find(MAC, 1, true) ~= nil, "lipc: setString runs for a MAC")
+executed = {}
+check(real_lipc.enable() == true, "lipc: enable reports the command result")
+check(#executed == 1 and executed[1]:find("BTenable 1:1", 1, true) ~= nil, "lipc: enable sets BTenable")
 os.execute = real_execute
 for _, line in ipairs(logs) do
     check(not line:find(MAC, 1, true), "lipc: MAC unmasked in log: " .. line)

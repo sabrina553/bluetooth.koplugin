@@ -49,6 +49,10 @@ Kindle.lipc = {
     setInt = function(prop, n)
         return shellOk(("timeout %d lipc-set-prop -i %s %s %d >/dev/null 2>&1"):format(LIPC_TIMEOUT_S, SERVICE, prop, n))
     end,
+    -- A fixed value, so nothing caller-supplied reaches the shell.
+    enable = function()
+        return shellOk(("timeout %d lipc-set-prop -s %s BTenable 1:1 >/dev/null 2>&1"):format(LIPC_TIMEOUT_S, SERVICE))
+    end,
     -- Every string property we set is an address, and it goes into a shell
     -- command unquoted: refuse anything else here, not only in the callers.
     setString = function(prop, s)
@@ -119,7 +123,12 @@ end
 
 function Kindle:enable()
     logger.dbg("Kindle: Enabling Bluetooth...")
-    Kindle.lipc.setInt("BTflightMode", 0)
+    -- BTflightMode 0 only restores a state saved by BTflightMode 1: after
+    -- btfd drops the radio on suspend there is none, and it does nothing
+    -- (PW 5.17.1, 2026-11-11). BTenable turns it on either way.
+    if not Kindle.lipc.enable() then
+        Kindle.lipc.setInt("BTflightMode", 0)
+    end
 end
 
 function Kindle:disable()
