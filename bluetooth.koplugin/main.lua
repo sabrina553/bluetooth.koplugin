@@ -25,6 +25,7 @@ local KeyStore = require("bluetooth/keys/store")
 local Keymap = require("bluetooth/keys/keymap")
 local Capture = require("bluetooth/keys/capture")
 local KeysMenu = require("bluetooth/ui/keys_menu")
+local RadioActions = require("bluetooth/ui/radio_actions")
 local InputContainer = require("ui/widget/container/inputcontainer")
 
 
@@ -85,6 +86,9 @@ function Bluetooth:init()
     })
 
     self.ui.menu:registerToMainMenu(self.menu)
+    -- KOReader only calls this on plugins loaded before Dispatcher's own
+    -- init; calling it here covers the rest, as core plugins do.
+    self:onDispatcherRegisterActions()
 
     Capture.ensureHook(Device.input)
     self:applyKeys()
@@ -249,6 +253,14 @@ function Bluetooth:onKeyPress(key)
     self.key_events = self.key_events or {}
     return InputContainer.onKeyPress(self, key)
 end
+
+function Bluetooth:onDispatcherRegisterActions()
+    RadioActions.register(require("dispatcher"))
+end
+
+function Bluetooth:onBluetoothToggle() RadioActions.switch(self.controller, nil); return true end
+function Bluetooth:onBluetoothOn() RadioActions.switch(self.controller, true); return true end
+function Bluetooth:onBluetoothOff() RadioActions.switch(self.controller, false); return true end
 
 --- The plugin closes with its view (file manager <-> book) and on exit.
 function Bluetooth:onCloseWidget()
