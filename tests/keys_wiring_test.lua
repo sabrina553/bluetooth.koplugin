@@ -81,6 +81,11 @@ package.preload["bluetooth/keys/store"] = function()
     } end }
 end
 
+local registered = {}
+package.preload["dispatcher"] = function()
+    return { registerAction = function(_, id) registered[id] = true end }
+end
+
 local Keymap = require("bluetooth/keys/keymap")
 local Bluetooth = require("main")
 
@@ -99,6 +104,7 @@ bindings["Kobo Remote"] = { { code = 108, screens = { reader = true, filemanager
 local p = newPlugin()
 check(event_map[108] == "Down", "init applies a key binding")
 check(hooks == 1, "init registers the capture hook")
+check(registered.bluetooth_koplugin_toggle, "init registers the Dispatcher actions")
 check(last_menu.keys_menu == last_keys_menu, "keys menu passed to the Bluetooth menu")
 
 p = newPlugin()
