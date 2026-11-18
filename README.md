@@ -50,6 +50,8 @@ Star a device from its hold menu to mark it as a favourite for *Starred on Wake*
 
 Bluetooth is never switched on automatically: if you turned it off, it stays off after a restart or wake. If it was on when the reader suspended, it is restored on wake.
 
+**Toggle Bluetooth**, **Turn on Bluetooth** and **Turn off Bluetooth** are also KOReader actions, in the **Device** section: bind them to a gesture or a profile, or add them to another plugin's quick-action menu (such as SimpleUI).
+
 Disconnecting a device yourself holds it: it is untrusted so it can't reconnect by itself, and it is skipped on wake until you connect it again.
 
 ## Buttons
