@@ -23,7 +23,9 @@ local LE_SCAN_S = 8
 -- off/on, until btmanagerd restarts (PW 5.17.1, 2026-11-11). Must end
 -- inside Bluez.runAsync's own 20 s.
 local LE_SCAN_SCRIPT = ([[
-d=$(mktemp -d) && mkfifo "$d/in" || exit 1
+d=$(mktemp -d) || exit 1
+trap 'rm -rf "$d"' EXIT
+mkfifo "$d/in" || exit 1
 timeout 18 ace_bt_cli < "$d/in" > "$d/out" 2>&1 &
 exec 3> "$d/in"
 echo "ble regble" >&3; sleep 1
@@ -34,7 +36,7 @@ if grep -q "Beacon Client Registered Success" "$d/out"; then
 fi
 echo exit >&3; exec 3>&-
 wait
-cat "$d/out"; rm -rf "$d"
+cat "$d/out"
 ]]):format(LE_SCAN_S)
 -- finlater's setup guide creates these; both present means remotes can pair.
 local UDEV_RULE = "/etc/udev/rules.d/99-bt-keyboard.rules"
@@ -153,6 +155,7 @@ end
 function Kindle:disable()
     logger.dbg("Kindle: Disabling Bluetooth...")
     Kindle.lipc.setInt("BTflightMode", 1)
+    Kindle.le_found = nil
 end
 
 local function firstOf(raw, keys)
@@ -309,6 +312,8 @@ function Kindle:unpair(mac) self:action("Unbond", mac) end
 --- input device (Xbox Series controller, PW 5.17.1, 2026-11-11).
 function Kindle:search(duration)
     duration = duration or DEFAULT_SCAN_S
+    -- Results last only for the scan that found them.
+    Kindle.le_found = nil
     local UIManager = require("ui/uimanager")
     if Kindle.scan_timer then UIManager:unschedule(Kindle.scan_timer) end
     Kindle.lipc.setInt("DiscoverA2DP", 1)
