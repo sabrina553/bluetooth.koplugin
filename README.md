@@ -11,7 +11,7 @@ A Bluetooth plugin for [KOReader](https://koreader.rocks/): scan for devices, pa
 | PocketBook (Linux-based) | Supported. Power is switched with `netagent`, everything else through BlueZ over D-Bus or `bluetoothctl`. |
 | Linux desktop / KOReader emulator | Supported through BlueZ (D-Bus or `bluetoothctl`). |
 | Kobo MTK (Libra Colour, Clara BW/Colour, Tolino Shine 5) | Experimental, development builds only, untested on a device. Talks to Kobo's own Bluetooth service over D-Bus. |
-| Kindle (with Bluetooth) | Experimental, development builds only, untested on a device. Headphones pair as usual; remotes need a one-time setup, see [Kindle](#kindle). |
+| Kindle (with Bluetooth) | Experimental, development builds only. Headphones pair as usual; remotes need a one-time setup, see [Kindle](#kindle). |
 | Older Kobo, Android | Not yet. The plugin disables itself on these. |
 
 Tested on a PocketBook Verse Pro, Verse Pro Colour and Era Colour, and on Fedora under the KOReader emulator. It should work on other Linux-based PocketBooks that ship BlueZ.
@@ -70,7 +70,7 @@ The setup is described in [kindlebtcontroller.koplugin's README](https://github.
 
 - It is verified on the Kindle Paperwhite 5 and 6.
 - **Don't** try it on older models such as the Oasis 1 or Paperwhite 3: they can end up on a white screen that needs recovery.
-- Classic and Bluetooth Low Energy (BLE) remotes both work. BLE is verified with an Xbox Series controller on firmware 5.17.1.
+- Classic and Bluetooth Low Energy (BLE) remotes both work. BLE is verified with an Xbox Series controller on firmware 5.17.1. Only devices with a public address are confirmed; ones with a random address may not pair.
 
 ## Updating
 
