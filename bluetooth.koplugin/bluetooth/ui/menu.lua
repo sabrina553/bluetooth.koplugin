@@ -9,6 +9,7 @@ local Event = require("ui/event")
 local ButtonDialog = require("ui/widget/buttondialog")
 local logger = require("logger")
 
+local Notify = require("bluetooth/ui/notify")
 local MenuFind = require("bluetooth/ui/menu_find")
 local DbusMonitor = require("bluetooth/controller/dbus_monitor")
 local PluginMetadata = require("bluetooth/plugin_metadata")
@@ -215,15 +216,9 @@ function BluetoothMenu:buildMenuTable()
                 self.controller:toggle(function(confirmed)
                     UIManager:close(msg)
                     if confirmed and self.controller.is_enabled then
-                        UIManager:show(InfoMessage:new{
-                            text = _("Bluetooth Enabled"),
-                            timeout = DONE_TOAST_S,
-                        })
+                        Notify.show(self.settings, "radio", _("Bluetooth Enabled"), DONE_TOAST_S)
                     elseif not self.controller.is_enabled then
-                        UIManager:show(InfoMessage:new{
-                            text = _("Bluetooth Disabled"),
-                            timeout = DONE_TOAST_S,
-                        })
+                        Notify.show(self.settings, "radio", _("Bluetooth Disabled"), DONE_TOAST_S)
                     else
                         UIManager:show(InfoMessage:new{
                             text = _("Could not confirm Bluetooth controller status "),
@@ -475,15 +470,11 @@ function BluetoothMenu:performToggle(dev, action, touchmenu_instance)
         -- good connect from off, 2026-10-13 reader log).
         if confirmed and action == TOGGLE_ACTIONS.connect and dev.held and not dev.connected then
             -- Longer than DONE_TOAST_S: this one has something to read.
-            UIManager:show(InfoMessage:new{
-                text = _("Disconnected from ") .. dev.name .. "\n" .. _("It stays off until you connect it."),
-                timeout = 2,
-            })
+            Notify.show(self.settings, "device",
+                _("Disconnected from ") .. dev.name .. "\n" .. _("It stays off until you connect it."), 2)
         elseif confirmed then
-            UIManager:show(InfoMessage:new{
-                text = (dev[action.field] and action.active_done_text or action.inactive_done_text) .. dev.name,
-                timeout = DONE_TOAST_S,
-            })
+            Notify.show(self.settings, "device",
+                (dev[action.field] and action.active_done_text or action.inactive_done_text) .. dev.name, DONE_TOAST_S)
         else
             UIManager:show(InfoMessage:new{
                 text = action.fail_text .. dev.name,
@@ -543,6 +534,30 @@ local function compact(items, separator)
     return out
 end
 
+function BluetoothMenu:getNotificationsMenu()
+    local function kindItem(text, kind)
+        return {
+            text = text,
+            enabled_func = function() return not self.settings:getNotify("quiet") end,
+            checked_func = function() return self.settings:getNotify(kind) end,
+            callback = function() self.settings:toggleNotify(kind) end,
+            keep_menu_open = true,
+        }
+    end
+    return {
+        {
+            text = _("Silent mode"),
+            help_text = _("Hide confirmation pop-ups. Errors still show."),
+            checked_func = function() return self.settings:getNotify("quiet") end,
+            callback = function() self.settings:toggleNotify("quiet") end,
+            keep_menu_open = true,
+            separator = true,
+        },
+        kindItem(_("Bluetooth on/off"), "radio"),
+        kindItem(_("Device connected/disconnected"), "device"),
+    }
+end
+
 function BluetoothMenu:getSettingsMenu()
      return compact({
         {
@@ -578,6 +593,10 @@ function BluetoothMenu:getSettingsMenu()
                 UIManager:broadcastEvent(Event:new("BluetoothSettingsChanged"))
             end,
             keep_menu_open = true,
+        },
+        {
+            text = _("Notifications"),
+            sub_item_table = self:getNotificationsMenu(),
             separator = true,
         },
         self:ifCan("transport", {

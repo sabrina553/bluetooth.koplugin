@@ -50,11 +50,13 @@ end
 local function last() return shown[#shown] or {} end
 
 local live = false
+local quiet = false
 local cannot = {} -- features the stub backend lacks
 local hint -- the stub backend's advice after a failed pairing
 local mode = "fast"
 local menu = BluetoothMenu:new({
-    settings = { getLiveUpdates = function() return live end },
+    settings = { getLiveUpdates = function() return live end,
+        shouldNotify = function() return not quiet end },
     controller = { activeMode = function() return mode end, is_enabled = true, known_devices = {},
         can = function(_, feature) return not cannot[feature] end,
         pairFailedHint = function() return hint end },
@@ -110,6 +112,18 @@ do
     rows[1].callback(nil)
     check("held: explains it stays off", (last().text or ""):find("stays off until you connect it", 1, true) ~= nil, true)
     check("held: shown long enough to read", last().timeout, 2)
+end
+
+-- Silenced device toasts: a confirmed connect shows nothing (decision 2026-11-20).
+do
+    shown = {}
+    quiet = true
+    local dev = device({ paired = true, connected = false }, true, nil, function(self) self.connected = true end)
+    local rows = {}
+    menu:pairedDevices(rows, { dev })
+    rows[1].callback(nil)
+    check("quiet: no connected toast", #shown, 1) -- only the progress message
+    quiet = false
 end
 
 -- A plain connect: the short confirmation.
