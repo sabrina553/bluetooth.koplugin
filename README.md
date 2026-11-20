@@ -10,8 +10,8 @@ A Bluetooth plugin for [KOReader](https://koreader.rocks/): scan for devices, pa
 | --- | --- |
 | PocketBook (Linux-based) | Supported. Power is switched with `netagent`, everything else through BlueZ over D-Bus or `bluetoothctl`. |
 | Linux desktop / KOReader emulator | Supported through BlueZ (D-Bus or `bluetoothctl`). |
-| Kobo MTK (Libra Colour, Clara BW/Colour, Tolino Shine 5) | Experimental, development builds only, untested on a device. Talks to Kobo's own Bluetooth service over D-Bus. |
-| Kindle (with Bluetooth) | Experimental, development builds only. Headphones pair as usual; remotes need a one-time setup, see [Kindle](#kindle). |
+| Kobo MTK (Libra Colour, Clara BW/Colour, Tolino Shine 5) | Experimental, in beta and development builds; untested on a device, reports welcome. Talks to Kobo's own Bluetooth service over D-Bus. |
+| Kindle (with Bluetooth) | Experimental, in beta and development builds; tested on the Paperwhite 5 and 6. Headphones pair as usual; remotes need a one-time setup, see [Kindle](#kindle). |
 | Older Kobo, Android | Not yet. The plugin disables itself on these. |
 
 Tested on a PocketBook Verse Pro, Verse Pro Colour and Era Colour, and on Fedora under the KOReader emulator. It should work on other Linux-based PocketBooks that ship BlueZ.
@@ -43,6 +43,8 @@ Open the top menu, go to **Tools** (the crossed wrench and screwdriver) and choo
 | Disable on Suspend | Switch Bluetooth off when the reader suspends. |
 | Starred on Wake | Reconnect starred devices on wake. |
 | Last on Wake | Reconnect the last connected device on wake. |
+| Turn off if none reconnect | After a wake or start-up, turn Bluetooth off when no starred or last-connected device reconnects within 15 seconds. It tries again on the next wake. Off by default; needs Starred or Last on Wake. |
+| Notifications | Silent mode hides confirmation pop-ups, or switch them off one kind at a time. Errors always show. |
 | Backend | Automatic (default), Fast (D-Bus) or Compatible (`bluetoothctl`). Only shown where there is a choice. |
 | Live updates (experimental) | Follow the radio and devices while the menu is open. Off by default. |
 
