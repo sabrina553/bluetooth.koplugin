@@ -332,7 +332,8 @@ do -- Capabilities (decision 2026-10-28): items a backend can't do are omitted.
 
     local function has(items, label)
         for _, item in ipairs(items) do
-            if (item.text_func and "Backend" or item.text) == label then return true end
+            local text = item.text_func and item.text_func() or item.text
+            if text == label or text:find("^" .. label .. ":") then return true end
         end
         return false
     end
@@ -340,10 +341,12 @@ do -- Capabilities (decision 2026-10-28): items a backend can't do are omitted.
     local settings = menu:getSettingsMenu()
     check("caps: Backend shown", has(settings, "Backend"), true)
     check("caps: Live updates shown", has(settings, "Live updates (experimental)"), true)
-    cannot = { transport = true }
+    check("caps: remote setup shown", has(settings, "Set up remotes…"), true)
+    cannot = { transport = true, remote_setup = true }
     settings = menu:getSettingsMenu()
     check("caps: Backend hidden", has(settings, "Backend"), false)
     check("caps: Live updates hidden", has(settings, "Live updates (experimental)"), false)
+    check("caps: remote setup hidden", has(settings, "Set up remotes…"), false)
     check("caps: About still last", settings[#settings].text, "About")
     cannot = {}
 end

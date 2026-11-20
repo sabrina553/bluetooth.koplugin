@@ -377,7 +377,7 @@ end
 --- Shown after a failed pairing; nil once the Kindle is set up for remotes.
 function Kindle:pairFailedHint()
     if Kindle.isPrepared() then return nil end
-    return _("Couldn't pair. Remotes and keyboards need a one-time setup on Kindle: see \"Kindle\" in the plugin's README. Headphones: put them in pairing mode and try again.")
+    return _("Couldn't pair. Remotes and keyboards need a one-time setup on Kindle: use Settings → Set up remotes… in this plugin. Headphones: put them in pairing mode and try again.")
 end
 
 return Kindle
