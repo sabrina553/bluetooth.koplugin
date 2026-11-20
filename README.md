@@ -1,8 +1,8 @@
 # Bluetooth.koplugin
 
-A Bluetooth plugin for [KOReader](https://koreader.rocks/): scan for devices, pair, connect and manage them from the KOReader menu, have them reconnect after the reader wakes, and bind remote buttons to KOReader actions.
+Bluetooth for [KOReader](https://koreader.rocks/) on PocketBook, Kobo and Kindle. Scan, pair and connect page-turn remotes, keyboards and other devices from the KOReader menu. Devices reconnect when the reader wakes, and you can bind remote buttons to any KOReader action, with no config files to edit. Bluetooth can also turn itself off when nothing reconnects, and has gesture actions to toggle it.
 
-> **Status: in development.** It currently supports PocketBook (and Linux, for testing), with experimental Kobo MTK and Kindle support. Expect rough edges and please report them on the [issue tracker](https://github.com/sabrina553/bluetooth.koplugin/issues); feature requests are welcome too.
+> **Status:** stable on PocketBook; Kobo (MTK) and Kindle support is newer and in beta. Please report problems on the [issue tracker](https://github.com/sabrina553/bluetooth.koplugin/issues); feature requests are welcome too.
 
 ## Supported devices
 
