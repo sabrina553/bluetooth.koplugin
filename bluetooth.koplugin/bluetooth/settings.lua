@@ -12,6 +12,7 @@ local BackendSelect = require("bluetooth/controller/backend_select")
 ---@field update_channel string "stable" | "beta" | "development"
 ---@field backend_mode string "auto" | "fast" | "compatible"
 ---@field live_updates boolean
+---@field off_if_unreachable boolean
 ---@field notify table<string, boolean> per-kind toast switches, plus `quiet` for all
 
 local DEFAULTS = {
@@ -22,6 +23,7 @@ local DEFAULTS = {
     update_channel = "stable",
     backend_mode = "auto",
     live_updates = false,
+    off_if_unreachable = false,
 }
 
 -- Toast kinds that can be silenced. Failures and refusals always show, since
@@ -30,6 +32,7 @@ local NOTIFY_DEFAULTS = {
     quiet = false,
     radio = true,
     device = true,
+    wake_off = true,
 }
 
 local function shallowCopy(t)
@@ -139,8 +142,17 @@ function BluetoothSettings:toggleLastOnWake()
     self:write()
 end
 
+function BluetoothSettings:getOffIfUnreachable()
+    return self.data.off_if_unreachable or DEFAULTS.off_if_unreachable
+end
+
+function BluetoothSettings:toggleOffIfUnreachable()
+    self.data.off_if_unreachable = not self:getOffIfUnreachable()
+    self:write()
+end
+
 --- Explicit nil check: `or` would turn a stored false back into a true default.
----@param kind string "quiet" | "radio" | "device"
+---@param kind string "quiet" | "radio" | "device" | "wake_off"
 function BluetoothSettings:getNotify(kind)
     local stored = self.data.notify and self.data.notify[kind]
     if stored == nil then return NOTIFY_DEFAULTS[kind] end

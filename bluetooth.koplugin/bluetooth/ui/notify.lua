@@ -3,7 +3,7 @@
 local Notify = {}
 
 ---@param settings BluetoothSettings|nil nil shows the toast regardless
----@param kind string "radio" | "device"
+---@param kind string "radio" | "device" | "wake_off"
 ---@param text string
 ---@param timeout number|nil
 function Notify.show(settings, kind, text, timeout)

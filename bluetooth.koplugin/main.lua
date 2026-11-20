@@ -18,6 +18,7 @@ local BluetoothMenu = require("bluetooth/ui/menu")
 local controller = require("bluetooth/controller/controller")
 local BluetoothSettings = require("bluetooth/settings")
 local Session = require("bluetooth/session")
+local Notify = require("bluetooth/ui/notify")
 local BluetoothDeviceStore = require("bluetooth/devicestore")
 local GithubAPI = require("bluetooth/ota/github_api")
 local BluetoothSelfUpdater = require("bluetooth/ota/self_updater")
@@ -127,7 +128,9 @@ function Bluetooth:restoreBluetoothState(allow_enable)
         self.controller:knownDevices(function(fresh)
             if fresh then
                 self:applyKeys()
-                self.controller:reconnectOnWake(function() self:applyKeys() end)
+                self.controller:reconnectOnWake(function() self:applyKeys() end, function()
+                    Notify.show(self.settings, "wake_off", _("Bluetooth turned off: no devices reconnected"), 3)
+                end)
             else
                 logger.dbg("Bluetooth.koplugin: device list went stale during wake, not reconnecting")
             end

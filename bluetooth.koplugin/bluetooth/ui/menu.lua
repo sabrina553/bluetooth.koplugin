@@ -555,6 +555,7 @@ function BluetoothMenu:getNotificationsMenu()
         },
         kindItem(_("Bluetooth on/off"), "radio"),
         kindItem(_("Device connected/disconnected"), "device"),
+        kindItem(_("Turned off: none reconnected"), "wake_off"),
     }
 end
 
@@ -591,6 +592,20 @@ function BluetoothMenu:getSettingsMenu()
             callback = function()
                 self.settings:toggleLastOnWake()
                 UIManager:broadcastEvent(Event:new("BluetoothSettingsChanged"))
+            end,
+            keep_menu_open = true,
+        },
+        {
+            text = _("Turn off if none reconnect"),
+            help_text = _("After waking or starting up, turn Bluetooth off when no starred or last-connected device has reconnected within 15 seconds. Bluetooth tries again on the next wake."),
+            enabled_func = function()
+                return self.settings:getStarredOnWake() or self.settings:getLastOnWake()
+            end,
+            checked_func = function()
+                return self.settings:getOffIfUnreachable()
+            end,
+            callback = function()
+                self.settings:toggleOffIfUnreachable()
             end,
             keep_menu_open = true,
         },
