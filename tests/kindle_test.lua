@@ -223,7 +223,7 @@ hashes.ListPaired = { { address = MAC } }
 runScheduled()
 check(result == true, "pair unprepared: success once paired")
 local hint = kindle:pairFailedHint()
-check(type(hint) == "string" and hint:find("README", 1, true) ~= nil, "unprepared: setup hint points to the README")
+check(type(hint) == "string" and hint:find("Set up remotes", 1, true) ~= nil, "unprepared: setup hint points to the menu")
 
 -- Connecting, or a read that shows a new connection, opens the remote's input device.
 local KoboInput = require("bluetooth/keys/kobo_input")

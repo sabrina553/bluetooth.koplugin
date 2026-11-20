@@ -10,6 +10,7 @@ local ButtonDialog = require("ui/widget/buttondialog")
 local logger = require("logger")
 
 local Notify = require("bluetooth/ui/notify")
+local KindleSetupMenu = require("bluetooth/ui/kindle_setup_menu")
 local MenuFind = require("bluetooth/ui/menu_find")
 local DbusMonitor = require("bluetooth/controller/dbus_monitor")
 local PluginMetadata = require("bluetooth/plugin_metadata")
@@ -637,6 +638,7 @@ function BluetoothMenu:getSettingsMenu()
             keep_menu_open = true,
             separator = true,
         }),
+        self:ifCan("remote_setup", KindleSetupMenu.item()),
         {
             text = _("About"),
             sub_item_table = self:getAboutMenu(),

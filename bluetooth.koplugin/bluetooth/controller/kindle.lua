@@ -1,8 +1,8 @@
 --- Kindle backend over lipc, against Kindle's own `com.lab126.btfd`.
 ---
 --- Stock firmware pairs only audio devices; remotes need a one-time root
---- setup the plugin never does (decision 2026-10-28, vault Docs/Kindle backend
---- design). Power and state follow finlater/kindlebtcontroller.koplugin (MIT),
+--- setup, offered opt-in from the menu by kindle_setup.lua (decision
+--- 2026-11-20). Power and state follow finlater/kindlebtcontroller.koplugin (MIT),
 --- lists, scan and actions ZenOS (GPL-3.0); see CREDITS.md. Untested on a device.
 
 local logger = require("logger")
@@ -47,7 +47,8 @@ local NAME_KEYS = { "name", "Name", "bd_name", "deviceName", "friendlyName" }
 
 local Kindle = {
     SERVICE = SERVICE,
-    capabilities = { trust = false, block = false, transport = false, info = false, address_pair = false },
+    capabilities = { trust = false, block = false, transport = false, info = false, address_pair = false,
+        remote_setup = true },
 }
 Kindle.__index = Kindle
 
@@ -109,8 +110,9 @@ Kindle.lipc = {
     end,
 }
 
---- Whether this Kindle has had the one-time setup for remotes. Checked once:
---- it needs root, so it can't change while KOReader runs.
+--- Whether this Kindle has had the one-time setup for remotes. Cached: only
+--- the plugin's own setup changes it while KOReader runs, and that calls
+--- `Kindle.forgetPrepared`.
 function Kindle.isPrepared()
     if Kindle._prepared == nil then
         local f = io.open(UDEV_RULE, "r")
@@ -121,11 +123,14 @@ function Kindle.isPrepared()
     return Kindle._prepared
 end
 
+function Kindle.forgetPrepared() Kindle._prepared = nil end
+
 --- address_pair is looked up on demand: the controller builds every backend
 --- at load on every device, and the setup check runs shell commands.
 function Kindle:new(ctrl)
     local o = setmetatable({ controller = ctrl }, Kindle)
-    o.capabilities = setmetatable({ trust = false, block = false, transport = false, info = false }, {
+    o.capabilities = setmetatable({ trust = false, block = false, transport = false, info = false,
+        remote_setup = true }, {
         __index = function(_, key)
             if key == "address_pair" then return Kindle.isPrepared() end
         end,
@@ -372,7 +377,7 @@ end
 --- Shown after a failed pairing; nil once the Kindle is set up for remotes.
 function Kindle:pairFailedHint()
     if Kindle.isPrepared() then return nil end
-    return _("Couldn't pair. Remotes and keyboards need a one-time setup on Kindle: see \"Kindle\" in the plugin's README. Headphones: put them in pairing mode and try again.")
+    return _("Couldn't pair. Remotes and keyboards need a one-time setup on Kindle: use Settings → Set up remotes… in this plugin. Headphones: put them in pairing mode and try again.")
 end
 
 return Kindle
