@@ -840,6 +840,74 @@ do -- Kobo MTK and Kindle keep their backend whatever the mode setting (decision
 end
 
 
+-- Turn off if none reconnect (decision 2026-11-20). Each case runs one wake,
+-- then drains the queue, which includes the 15 s grace task.
+local function wakeCase(opts)
+    for i = #queue, 1, -1 do queue[i] = nil end
+    local Devices = require("bluetooth/controller/devices")
+    local c = build(true)
+    c.settings = {
+        getStarredOnWake = function() return opts.starred_on_wake ~= false end,
+        getLastOnWake = function() return false end,
+        getOffIfUnreachable = function() return opts.setting ~= false end,
+        setRadioWasOn = function() end,
+    }
+    c.device_store.getStarred = function() return opts.starred or { { mac = "AA:AA" }, { mac = "BB:BB" } } end
+    local grace_phase = false
+    fake.knownDevices = function()
+        return {
+            Devices:new({ mac = "AA:AA", name = "A", paired = true, controller = c,
+                connected = grace_phase and opts.self_connects == true }),
+            Devices:new({ mac = "BB:BB", name = "B", paired = true, connected = false, controller = c }),
+        }
+    end
+    c:status()
+    c:knownDevices()
+    local ok = opts.ok or {}
+    for _, dev in ipairs(c.known_devices) do
+        dev.connect = function(_, cb) cb(ok[dev.mac] == true) end
+    end
+    local offs, toasts = 0, 0
+    c.disable = function(_, cb) offs = offs + 1; cb(true) end
+    c:reconnectOnWake(nil, function() toasts = toasts + 1 end)
+    grace_phase = true
+    if opts.between then opts.between(c) end
+    while #queue > 0 do table.remove(queue, 1)() end
+    return offs, toasts, c
+end
+
+do
+    local offs, toasts, c = wakeCase({})
+    check(offs == 1 and toasts == 1, "wake off: all failed turns off and notifies, got " .. offs .. "/" .. toasts)
+
+    -- The radio is off now, but the next suspend still records it as wanted.
+    fake.status = function() return false end
+    c:status()
+    c:snapshotBeforeSuspend()
+    check(c.was_enabled_before_suspend == true, "wake off: next wake tries again")
+    c:snapshotBeforeSuspend()
+    check(c.was_enabled_before_suspend == false, "wake off: retry intent used once")
+    fake.status = function() return true end
+
+    offs = wakeCase({ ok = { ["BB:BB"] = true } })
+    check(offs == 0, "wake off: one of two connected keeps the radio on")
+
+    offs = wakeCase({ setting = false })
+    check(offs == 0, "wake off: setting off keeps the radio on")
+
+    offs = wakeCase({ starred = {} })
+    check(offs == 1, "wake off: nothing to reconnect turns off")
+
+    offs = wakeCase({ starred = {}, starred_on_wake = false })
+    check(offs == 0, "wake off: both wake options off never judges")
+
+    offs = wakeCase({ self_connects = true })
+    check(offs == 0, "wake off: a device that connects during the grace keeps the radio on")
+
+    offs = wakeCase({ between = function(wc) controller.enable(wc) end })
+    check(offs == 0, "wake off: a user switch during the grace wins")
+end
+
 do -- pairFailedHint: the backend's advice after a failed pairing (decision 2026-10-28).
     local c = setmetatable({ backend = nil }, { __index = controller })
     check(c:pairFailedHint() == nil, "hint: none without a backend")

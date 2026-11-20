@@ -12,6 +12,8 @@ local BackendSelect = require("bluetooth/controller/backend_select")
 ---@field update_channel string "stable" | "beta" | "development"
 ---@field backend_mode string "auto" | "fast" | "compatible"
 ---@field live_updates boolean
+---@field off_if_unreachable boolean
+---@field notify table<string, boolean> per-kind toast switches, plus `quiet` for all
 
 local DEFAULTS = {
     disable_on_suspend = false,
@@ -21,6 +23,16 @@ local DEFAULTS = {
     update_channel = "stable",
     backend_mode = "auto",
     live_updates = false,
+    off_if_unreachable = false,
+}
+
+-- Toast kinds that can be silenced. Failures and refusals always show, since
+-- hiding them would leave a tap with no visible outcome.
+local NOTIFY_DEFAULTS = {
+    quiet = false,
+    radio = true,
+    device = true,
+    wake_off = true,
 }
 
 local function shallowCopy(t)
@@ -128,6 +140,36 @@ end
 function BluetoothSettings:toggleLastOnWake()
     self.data.last_on_wake = not self:getLastOnWake()
     self:write()
+end
+
+function BluetoothSettings:getOffIfUnreachable()
+    return self.data.off_if_unreachable or DEFAULTS.off_if_unreachable
+end
+
+function BluetoothSettings:toggleOffIfUnreachable()
+    self.data.off_if_unreachable = not self:getOffIfUnreachable()
+    self:write()
+end
+
+--- Explicit nil check: `or` would turn a stored false back into a true default.
+---@param kind string "quiet" | "radio" | "device" | "wake_off"
+function BluetoothSettings:getNotify(kind)
+    local stored = self.data.notify and self.data.notify[kind]
+    if stored == nil then return NOTIFY_DEFAULTS[kind] end
+    return stored
+end
+
+---@param kind string
+function BluetoothSettings:toggleNotify(kind)
+    self.data.notify = self.data.notify or {}
+    self.data.notify[kind] = not self:getNotify(kind)
+    self:write()
+end
+
+--- Whether a toast of this kind should show right now.
+---@param kind string
+function BluetoothSettings:shouldNotify(kind)
+    return not self:getNotify("quiet") and self:getNotify(kind) == true
 end
 
 --- Last radio state the user chose (menu) or had at suspend, restored at a

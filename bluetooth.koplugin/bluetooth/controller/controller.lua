@@ -39,6 +39,13 @@ local controller = {}
 -- (decision 2026-10-27).
 local switch = {}
 
+local user_switching = false
+
+-- Grace after the last wake connect attempt before "Turn off if none
+-- reconnect" judges. Long on purpose: it runs in the background, and slow
+-- remotes get the benefit of the doubt (decision 2026-11-20).
+local WAKE_GIVE_UP_GRACE_S = 15
+
 --- Test-only: clears the shared switch state so each test starts idle.
 function controller._resetSwitchState()
     switch = {}
@@ -228,7 +235,10 @@ function controller:snapshotBeforeSuspend(callback)
     self:status()
     -- Intent, not the reading: a suspend mid-enable sees the radio still off,
     -- and resume would then leave it off (seen 2026-10-13, quick suspend cycles).
-    self.was_enabled_before_suspend = self:wantsEnabled()
+    -- A radio turned off because nothing reconnected still counts as wanted,
+    -- so the next wake tries again (decision 2026-11-20).
+    self.was_enabled_before_suspend = self:wantsEnabled() or switch.off_after_failed_wake == true
+    switch.off_after_failed_wake = nil
     -- On disk too, so a cold start after a shutdown or flat battery restores it.
     if self.settings then self.settings:setRadioWasOn(self.was_enabled_before_suspend) end
     self.connected_at_suspend = nil
@@ -258,8 +268,12 @@ end
 --- wake. Reconnects every starred device and/or whatever was connected right
 --- before suspend, gated by the corresponding settings. `on_connected` runs
 --- after each connect attempt, so key bindings follow the new connections.
+--- With "Turn off if none reconnect" on, the radio goes off when no
+--- attempt succeeds, including when there was nothing to try; `on_turned_off`
+--- runs after that.
 ---@param on_connected fun(ok: boolean)|nil
-function controller:reconnectOnWake(on_connected)
+---@param on_turned_off fun()|nil
+function controller:reconnectOnWake(on_connected, on_turned_off)
     if not self.settings or not self.device_store then
         return
     end
@@ -290,17 +304,69 @@ function controller:reconnectOnWake(on_connected)
         self.connected_at_suspend == nil and ", no suspend snapshot" or ""))
     self.connected_at_suspend = nil
 
+    local judge = self.settings.getOffIfUnreachable and self.settings:getOffIfUnreachable()
+        and (self.settings:getStarredOnWake() or self.settings:getLastOnWake())
+    local generation = switch.poll_generation
+    local pending, any_connected, all_started = 0, false, false
+    local attempts, connected = 0, 0
+    local function settle()
+        -- Success is otherwise silent, so a good wake left no trace (reader log 2026-11-20).
+        logger.dbg(string.format("Bluetooth: wake reconnect, %d of %d connected", connected, attempts))
+        if not judge or any_connected then return end
+        UIManager:scheduleIn(WAKE_GIVE_UP_GRACE_S, function()
+            self:turnOffIfNoneConnected(generation, on_turned_off)
+        end)
+    end
+
     for mac in pairs(wanted_macs) do
         local dev = self:getDevice(mac)
         if dev and dev.held then
             logger.dbg("Bluetooth: " .. Parse.maskMac(mac) .. " was disconnected by hand, not reconnecting on wake")
         elseif dev then
             logger.dbg("Bluetooth: reconnecting to " .. Parse.maskMac(mac) .. " on wake")
-            dev:connect(on_connected)
+            pending = pending + 1
+            attempts = attempts + 1
+            dev:connect(function(ok)
+                if ok then any_connected = true; connected = connected + 1 end
+                if on_connected then on_connected(ok) end
+                pending = pending - 1
+                if pending == 0 and all_started then settle() end
+            end)
         else
             logger.warn("Bluetooth: stored device " .. Parse.maskMac(mac) .. " not found among known_devices, skipping wake reconnect")
         end
     end
+    -- Connect callbacks can fire inline, so settle only once every attempt
+    -- has started; with no attempts this settles straight away.
+    all_started = true
+    if pending == 0 then settle() end
+end
+
+--- Second half of "Turn off if none reconnect", after the grace period.
+--- Skipped when the radio was switched meanwhile (generation moved on) or a
+--- device came up by itself, which trusted remotes often do after the
+--- connect poll has given up.
+---@param generation integer switch.poll_generation when the wake started
+---@param on_turned_off fun()|nil
+function controller:turnOffIfNoneConnected(generation, on_turned_off)
+    if generation ~= switch.poll_generation or user_switching then
+        logger.dbg("Bluetooth: radio switched since wake, keeping it as it is")
+        return
+    end
+    self:knownDevices(function(fresh)
+        if not fresh or generation ~= switch.poll_generation then return end
+        for _, dev in ipairs(self.known_devices or {}) do
+            if dev.connected then
+                logger.dbg("Bluetooth: " .. Parse.maskMac(dev.mac) .. " connected during the grace period, keeping the radio on")
+                return
+            end
+        end
+        logger.info("Bluetooth: no device reconnected on wake, turning the radio off")
+        switch.off_after_failed_wake = true
+        self:disable(function(confirmed)
+            if confirmed and on_turned_off then on_turned_off() end
+        end)
+    end)
 end
 
 -- How long enable()/disable() wait before actually issuing the radio
@@ -533,9 +599,6 @@ function controller:disable(callback)
     end)
 end
 
--- Module level, not per instance, like switch above: main.lua builds a new
--- controller on every view change while the old one's poll finishes the switch.
-local user_switching = false
 
 --- True while a switch the user started with toggle() is under way. Restores,
 --- connects and suspends switch the radio too, but must not block the menu.
@@ -552,6 +615,8 @@ end
 function controller:toggle(callback, status_fresh)
     if not status_fresh then self:status() end
     local turn_on = not self:wantsEnabled()
+    -- The user's choice replaces the retry-on-next-wake intent.
+    switch.off_after_failed_wake = nil
     if self.settings then self.settings:setRadioWasOn(turn_on) end
     user_switching = true
     local function done(...)

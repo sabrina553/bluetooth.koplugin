@@ -5,6 +5,7 @@
 --- Only on a user's action: never enabled automatically (decision 2026-11-18).
 local logger = require("logger")
 local _ = require("gettext")
+local Notify = require("bluetooth/ui/notify")
 
 local RadioActions = {}
 
@@ -46,7 +47,7 @@ function RadioActions.switch(controller, want)
     controller:status()
     local on = controller:wantsEnabled()
     if want ~= nil and want == on then
-        toast(on and _("Bluetooth is already on") or _("Bluetooth is already off"), DONE_TOAST_S)
+        Notify.show(controller.settings, "radio", on and _("Bluetooth is already on") or _("Bluetooth is already off"), DONE_TOAST_S)
         return
     end
     local UIManager = require("ui/uimanager")
@@ -56,7 +57,7 @@ function RadioActions.switch(controller, want)
     controller:toggle(function(confirmed)
         UIManager:close(msg)
         if confirmed then
-            toast(controller.is_enabled and _("Bluetooth Enabled") or _("Bluetooth Disabled"), DONE_TOAST_S)
+            Notify.show(controller.settings, "radio", controller.is_enabled and _("Bluetooth Enabled") or _("Bluetooth Disabled"), DONE_TOAST_S)
         else
             toast(_("Could not confirm Bluetooth controller status"), 2)
         end
