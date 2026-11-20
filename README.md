@@ -10,8 +10,8 @@ A Bluetooth plugin for [KOReader](https://koreader.rocks/): scan for devices, pa
 | --- | --- |
 | PocketBook (Linux-based) | Supported. Power is switched with `netagent`, everything else through BlueZ over D-Bus or `bluetoothctl`. |
 | Linux desktop / KOReader emulator | Supported through BlueZ (D-Bus or `bluetoothctl`). |
-| Kobo MTK (Libra Colour, Clara BW/Colour, Tolino Shine 5) | Experimental, development builds only, untested on a device. Talks to Kobo's own Bluetooth service over D-Bus. |
-| Kindle (with Bluetooth) | Experimental, development builds only. Headphones pair as usual; remotes need a one-time setup, see [Kindle](#kindle). |
+| Kobo MTK (Libra Colour, Clara BW/Colour, Tolino Shine 5) | Experimental, in beta and development builds; untested on a device, reports welcome. Talks to Kobo's own Bluetooth service over D-Bus. |
+| Kindle (with Bluetooth) | Experimental, in beta and development builds; tested on the Paperwhite 5 and 6. Headphones pair as usual; remotes need a one-time setup, see [Kindle](#kindle). |
 | Older Kobo, Android | Not yet. The plugin disables itself on these. |
 
 Tested on a PocketBook Verse Pro, Verse Pro Colour and Era Colour, and on Fedora under the KOReader emulator. It should work on other Linux-based PocketBooks that ship BlueZ.
@@ -43,8 +43,11 @@ Open the top menu, go to **Tools** (the crossed wrench and screwdriver) and choo
 | Disable on Suspend | Switch Bluetooth off when the reader suspends. |
 | Starred on Wake | Reconnect starred devices on wake. |
 | Last on Wake | Reconnect the last connected device on wake. |
+| Turn off if none reconnect | After a wake or start-up, turn Bluetooth off when no starred or last-connected device reconnects within 15 seconds. It tries again on the next wake. Off by default; needs Starred or Last on Wake. |
+| Notifications | Silent mode hides confirmation pop-ups, or switch them off one kind at a time. Errors always show. |
 | Backend | Automatic (default), Fast (D-Bus) or Compatible (`bluetoothctl`). Only shown where there is a choice. |
 | Live updates (experimental) | Follow the radio and devices while the menu is open. Off by default. |
+| Set up remotes… | Kindle only: the one-time setup that lets remotes pair, see [Kindle](#kindle). |
 
 Star a device from its hold menu to mark it as a favourite for *Starred on Wake*.
 
@@ -74,7 +77,7 @@ Kindle's own software only pairs audio devices such as headphones. Page-turn rem
 
 Once it's done, you can pair remotes from the plugin (including **Pair by address…** on the scan screen, since Kindle's scan may not list them), turn pages with them, and bind their buttons to any KOReader action.
 
-- It is verified on the Kindle Paperwhite 5 and 6.
+- The setup steps and pairing remotes are verified on the Kindle Paperwhite 5 and 6, done by hand. The in-plugin setup itself hasn't run on a Kindle yet, so your report matters.
 - Older models such as the Oasis 1 and Paperwhite 3 have ended up on a white screen that needs recovery. The plugin warns you a second time on these; only continue if you know how to recover your Kindle.
 - Other models are untested: you can try, and your report helps everyone.
 - Classic and Bluetooth Low Energy (BLE) remotes both work. BLE is verified with an Xbox Series controller on firmware 5.17.1. Only devices with a public address are confirmed; ones with a random address may not pair.
