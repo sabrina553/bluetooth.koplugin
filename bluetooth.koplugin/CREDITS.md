@@ -22,6 +22,8 @@
   (`BTflightMode`), state (`BTstate`) and the remote setup the README points to come from
   [finlater/kindlebtcontroller.koplugin](https://github.com/finlater/kindlebtcontroller.koplugin),
   MIT licence, Copyright (c) 2025 qiuyukang.
+- `bluetooth/controller/kindle_setup.lua`: the remote setup's helper script, udev rule
+  and marker files are adapted from the same project's setup guide (MIT).
 
 ## References
 

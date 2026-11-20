@@ -62,14 +62,21 @@ Bindings are saved per remote, by its Bluetooth name.
 
 ## Kindle
 
-Kindle's own software only pairs audio devices such as headphones. Page-turn remotes, keyboards and game controllers need a one-time setup first, which needs root access. The plugin never changes system files itself.
+Kindle's own software only pairs audio devices such as headphones. Page-turn remotes, keyboards and game controllers need a one-time setup first, which needs root access.
+
+**Settings → Set up remotes…** does it for you, after explaining the risks and what to back up:
+
+- It adds a udev rule and a small helper script so the Kindle treats the remote as an input device, and marker files that stop disconnects filling the storage with logs. These steps come from [kindlebtcontroller.koplugin's guide](https://github.com/finlater/kindlebtcontroller.koplugin#before-you-install-prepare-bluetooth-pairing) and the [MobileRead guide](https://www.mobileread.com/forums/showthread.php?t=369712).
+- Every file it changes is copied first to `koreader/settings/bluetooth_kindle_setup/`. The system partition is unlocked only while the files are written and always locked again. If a step fails, the original files are put back.
+- **Settings → Undo remote setup…** restores the originals. A firmware update may remove the setup; run it again afterwards.
+- It skips the guide's optional `dmcc.sh` edit. The marker files cover most of what that edit did.
+- **Please report** how it went, success or failure, with your model and firmware, in an [issue](https://github.com/sabrina553/bluetooth.koplugin/issues). The setup screen shows both. Each report tells other owners of that model whether it's safe.
 
 Once it's done, you can pair remotes from the plugin (including **Pair by address…** on the scan screen, since Kindle's scan may not list them), turn pages with them, and bind their buttons to any KOReader action.
 
-The setup is described in [kindlebtcontroller.koplugin's README](https://github.com/finlater/kindlebtcontroller.koplugin#before-you-install-prepare-bluetooth-pairing) and the [MobileRead guide](https://www.mobileread.com/forums/showthread.php?t=369712). In short: a udev rule and a small helper script so the Kindle treats the remote as an input device, pairing with `ace_bt_cli`, and marker files that stop disconnects filling the disk with logs.
-
 - It is verified on the Kindle Paperwhite 5 and 6.
-- **Don't** try it on older models such as the Oasis 1 or Paperwhite 3: they can end up on a white screen that needs recovery.
+- Older models such as the Oasis 1 and Paperwhite 3 have ended up on a white screen that needs recovery. The plugin warns you a second time on these; only continue if you know how to recover your Kindle.
+- Other models are untested: you can try, and your report helps everyone.
 - Classic and Bluetooth Low Energy (BLE) remotes both work. BLE is verified with an Xbox Series controller on firmware 5.17.1. Only devices with a public address are confirmed; ones with a random address may not pair.
 
 ## Updating
