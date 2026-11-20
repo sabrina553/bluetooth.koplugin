@@ -26,6 +26,8 @@ Contract.FEATURES = {
     -- Pairing a device typed in by address, for remotes Kindle's audio-only
     -- scan never lists (decision 2026-10-28).
     address_pair = {},
+    -- Kindle's opt-in system setup for remotes (decision 2026-11-20).
+    remote_setup = {},
 }
 
 ---@param backend table
