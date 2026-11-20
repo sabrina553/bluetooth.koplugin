@@ -38,6 +38,9 @@ local Parse = require("bluetooth/controller/bluetoothctl_parse")
 
 local bluez = {}
 
+-- See backend_contract.lua; BluezDbus inherits this through __index.
+bluez.capabilities = { trust = true, block = true, transport = true, info = true }
+
 -- bluetoothctl and netagent write progress to stdout/stderr, which KOReader
 -- inherits and logs, so background commands are silenced. Output is only
 -- captured where we actually parse it.
@@ -186,14 +189,27 @@ bluez.PAIR_SESSION_S = 20
 -- The running pairing session; only its own check() clears it.
 bluez.pair_session = nil
 
--- What bluetoothctl prints when a pairing ends, and what it means.
+-- What bluetoothctl prints when a pairing ends, and what it means (BlueZ
+-- 5.52 client/main.c). "<mac>" stands for the address it echoes back.
 local PAIR_RESULTS = {
     { "Pairing successful", true },
     { "Failed to pair", false },
     -- BlueZ drops scan results 3 min after a scan; the list isn't refreshed.
-    { "not available", false },
+    { "Device <mac> not available", false },
     { "No default controller available", false },
 }
+
+-- A result counts only at the start of a line, after nothing but spaceless
+-- noise (\r, colour codes) or the "[name]# " prompt. "[NEW] Device <mac> <name>"
+-- has a space before the name, so a device named like a result never matches.
+-- Basic regex for BusyBox grep, mirrored as Lua patterns for pairResult.
+local PAIR_PREFIXES_BRE = { "^[^ ]*", "^[^ ]*\\[[^]]*\\][^ ]*# [^ ]*" }
+local PAIR_PREFIXES_LUA = { "^[^ ]*", "^[^ ]*%[[^%]]*%][^ ]*# [^ ]*" }
+
+-- The result texts are letters and spaces, so only "<mac>" needs translating.
+local function pairResultPattern(text, lua)
+    return (text:gsub("<mac>", lua and "[%%x:]*" or "[0-9A-Fa-f:]*"))
+end
 
 --- The shell command for one pairing session, or nil if `mac` isn't a MAC
 --- (it goes into a shell command). Output goes to `out`; the feeding side
@@ -209,15 +225,19 @@ function bluez.pairCommand(mac, out)
     if type(out) ~= "string" or not out:match("^[%w%._/%-]+$") then
         return nil
     end
-    -- One -e per string: BusyBox 1.22 has -E only if built with it.
+    -- One -e per pattern: BusyBox 1.22 has -E only if built with it.
     local patterns = {}
     for _, result in ipairs(PAIR_RESULTS) do
-        table.insert(patterns, "-e '" .. result[1] .. "'")
+        for _, prefix in ipairs(PAIR_PREFIXES_BRE) do
+            table.insert(patterns, "-e '" .. prefix .. pairResultPattern(result[1]) .. "'")
+        end
     end
     local feed = ("printf 'default-agent\\npair %s\\n'; i=0; while [ $i -lt %d ]; do sleep 1; "
         .. "grep -q %s %s && break; i=$((i+1)); done; printf 'quit\\n'")
         :format(mac, bluez.PAIR_SESSION_S, table.concat(patterns, " "), out)
-    return ("( (%s) | %sbluetoothctl --agent NoInputNoOutput; echo @@done ) >%s 2>&1")
+    -- The bare echo ends any prompt left without a newline, so "@@done" gets
+    -- a line of its own.
+    return ("( (%s) | %sbluetoothctl --agent NoInputNoOutput; echo; echo @@done ) >%s 2>&1")
         :format(feed, bluez.timeoutPrefix(bluez.PAIR_SESSION_S + 5), out)
 end
 
@@ -225,8 +245,12 @@ end
 ---@param text string
 ---@return boolean|nil
 function bluez.pairResult(text)
-    for _, result in ipairs(PAIR_RESULTS) do
-        if (text or ""):find(result[1], 1, true) then return result[2] end
+    for line in (text or ""):gmatch("[^\n]+") do
+        for _, result in ipairs(PAIR_RESULTS) do
+            for _, prefix in ipairs(PAIR_PREFIXES_LUA) do
+                if line:find(prefix .. pairResultPattern(result[1], true)) then return result[2] end
+            end
+        end
     end
     return nil
 end
@@ -267,17 +291,22 @@ end
 ---@param on_done fun(result: boolean|nil)|nil
 ---@return boolean, string|nil
 function bluez:pair(mac, on_done)
-    local out = os.tmpname()
-    local cmd = bluez.pairCommand(mac, out)
-    if not cmd then
-        os.remove(out)
+    -- Refusals first, before the temp file: a refused pair costs nothing.
+    -- A placeholder path checks the MAC the same way the real one will.
+    if not bluez.pairCommand(mac, "/tmp/x") then
         logger.warn("Bluez: not pairing, not a MAC: " .. Parse.maskMac(tostring(mac)))
         return false, "invalid"
     end
     if bluez.pair_session then
         logger.info("Bluez: a pairing session is still running, not starting another for " .. Parse.maskMac(mac))
-        os.remove(out)
         return false, "busy"
+    end
+    local out = os.tmpname()
+    local cmd = bluez.pairCommand(mac, out)
+    if not cmd then
+        os.remove(out)
+        logger.warn("Bluez: not pairing, unexpected temp path: " .. tostring(out))
+        return false, "invalid"
     end
     local session = {}
     bluez.pair_session = session
@@ -293,7 +322,7 @@ function bluez:pair(mac, on_done)
         local text = f and f:read("*a") or ""
         if f then f:close() end
         ticks_left = ticks_left - 1
-        if not text:find("@@done", 1, true) and ticks_left > 0 then
+        if not text:find("\n@@done\n$") and ticks_left > 0 then
             return UIManager:scheduleIn(1, check)
         end
         os.remove(out)
@@ -461,7 +490,9 @@ function bluez.runAsync(script, done)
     os.execute(("( %ssh %s > %s.part 2>&1; mv %s.part %s; [ -e %s ] || rm -f %s ) >/dev/null 2>&1 &")
         :format(bluez.timeoutPrefix(SNAPSHOT_TIMEOUT_S), script_path, out_path, out_path, out_path, script_path, out_path))
 
-    local deadline = os.time() + SNAPSHOT_TIMEOUT_S + 5
+    -- Ticks, not os.time, as in pair(): a suspend jumps the clock but pauses
+    -- this timer and the command alike. Two extra for the short back-off ticks.
+    local ticks_left = math.ceil((SNAPSHOT_TIMEOUT_S + 5) / SNAPSHOT_POLL_S) + 2
     local function cleanup()
         os.remove(base); os.remove(script_path); os.remove(out_path)
     end
@@ -474,7 +505,8 @@ function bluez.runAsync(script, done)
             cleanup()
             return done(text)
         end
-        if os.time() > deadline then
+        ticks_left = ticks_left - 1
+        if ticks_left <= 0 then
             cleanup()
             return done(nil)
         end

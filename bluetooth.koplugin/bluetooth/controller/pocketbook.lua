@@ -18,7 +18,11 @@ local Parse = require("bluetooth/controller/bluetoothctl_parse")
 
 -- Power is always netagent's; everything else goes to the transport, Bluez
 -- (Compatible) or BluezDbus (Fast), chosen by controller:applyMode().
-local pocketbook = { transport = Bluez }
+local pocketbook = {
+    transport = Bluez,
+    -- See backend_contract.lua.
+    capabilities = { trust = true, block = true, transport = true, info = true },
+}
 
 function pocketbook:new(ctrl)
     self.__index = self

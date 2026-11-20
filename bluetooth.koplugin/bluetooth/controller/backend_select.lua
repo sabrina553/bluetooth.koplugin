@@ -5,19 +5,69 @@
 
 local BackendSelect = {}
 
+local LIPC_GET = "/usr/bin/lipc-get-prop"
+
+local function fileExists(path)
+    local f = io.open(path, "r")
+    if f then f:close() end
+    return f ~= nil
+end
+
 --- The order matters: Android is checked first so it never falls through to
 --- a Linux-style backend, and a device we have no backend for returns nil.
 ---@param Device table KOReader's `device` module
----@return string|nil backend "PocketBook" or "Bluez", nil if unsupported
-function BackendSelect.select(Device)
+---@param file_exists function|nil path -> boolean, for tests
+---@return string|nil backend "PocketBook", "Bluez", "KoboMTK" or "Kindle", nil if unsupported
+function BackendSelect.select(Device, file_exists)
     if Device:isAndroid() then
         return nil
     elseif Device:isPocketBook() then
         return "PocketBook"
+    elseif Device:isKobo() then
+        -- Only MTK models so far; older Kobos start their stack by hand
+        -- (decision 2026-10-28).
+        return BackendSelect.family(Device, file_exists) == "kobo-mtk" and "KoboMTK" or nil
+    elseif Device:isKindle() then
+        -- Only where Kindle's lipc tools exist; older Kindles without
+        -- Bluetooth stay disabled (decision 2026-10-28).
+        return (file_exists or fileExists)(LIPC_GET) and "Kindle" or nil
     elseif Device:isEmulator() or Device:isDesktop() then
         return "Bluez"
     end
-    -- Kindle and Kobo have no backend yet.
+    return nil
+end
+
+-- Adapted from ZenOS (GPL-3.0), modules/menu/bluetooth/kobo_bluetooth.lua;
+-- see CREDITS.md. MTK Kobos run Kobo's own BlueZ-like D-Bus service.
+local MTK_SERVICE = "/usr/share/dbus-1/system-services/com.kobo.mtk.bluedroid.service"
+-- Libra 2, Clara 2E and Sage: the stack is started by hand.
+local KOBO_LEGACY = { Kobo_io = true, Kobo_goldfinch = true, Kobo_cadmus = true }
+
+--- Which kind of device this is, for logging and for `select` (decision
+--- 2026-10-28).
+---@param Device table KOReader's `device` module
+---@param file_exists function|nil path -> boolean, for tests
+---@return string|nil family "kobo-mtk" | "kobo-legacy" | "kobo" | "kindle"
+---  | "pocketbook" | "android" | "desktop"
+function BackendSelect.family(Device, file_exists)
+    file_exists = file_exists or fileExists
+    if Device:isAndroid() then
+        return "android"
+    elseif Device:isPocketBook() then
+        return "pocketbook"
+    elseif Device:isKobo() then
+        -- isMTK is missing on older KOReader builds.
+        if Device.isMTK and Device:isMTK() and file_exists(MTK_SERVICE) then
+            return "kobo-mtk"
+        elseif KOBO_LEGACY[Device.model] then
+            return "kobo-legacy"
+        end
+        return "kobo"
+    elseif Device:isKindle() then
+        return "kindle"
+    elseif Device:isEmulator() or Device:isDesktop() then
+        return "desktop"
+    end
     return nil
 end
 
